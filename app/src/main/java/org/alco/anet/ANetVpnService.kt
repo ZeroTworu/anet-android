@@ -1,13 +1,11 @@
 package org.alco.anet
 
-import android.app.NotificationManager
 import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-
-private val CHANNEL_ID = "ANetChannel"
+import android.app.NotificationManager
 
 class ANetVpnService : VpnService() {
 
@@ -17,57 +15,67 @@ class ANetVpnService : VpnService() {
         init {
             System.loadLibrary("anet_mobile")
         }
+        const val ACTION_CONNECT = "org.alco.anet.CONNECT"
+        const val ACTION_STOP = "org.alco.anet.STOP"
     }
 
     // Native methods
     private external fun initLogger()
+    // Обрати внимание: имя функции в Rust должно быть Java_org_alco_anet_ANetVpnService_connectVpn
     private external fun connectVpn(config: String)
+    // Имя в Rust: Java_org_alco_anet_ANetVpnService_stopVpn
     private external fun stopVpn()
 
     override fun onCreate() {
         super.onCreate()
         initLogger()
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val channel = android.app.NotificationChannel(
-                CHANNEL_ID,
-                "ANet VPN Status",
-                android.app.NotificationManager.IMPORTANCE_LOW // Чтобы не пикало
-            )
-            val manager = getSystemService(android.app.NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") {
-            stopVpnNative()
+        val action = intent?.action
+
+        if (action == ACTION_STOP) {
+            Log.i("ANet", "Received STOP Intent")
+            // Запускаем остановку в отдельном потоке, так как stopVpn в Rust ждет async задач
+            Thread {
+                stopVpn() // Rust вызовет onStatusChanged("VPN Stopped") перед выходом
+                // Закрытие интерфейса и остановка сервиса
+                stopVpnInternal()
+            }.start()
+
             return START_NOT_STICKY
         }
 
-        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+        createNotificationChannel()
+
+        // Логика запуска (CONNECT)
+        // Создаем уведомление (обязательно для Foreground Service)
+        val notification = NotificationCompat.Builder(this, "ANetChannel")
             .setContentTitle("ANet VPN")
-            .setContentText("Connected to secure network")
-            .setSmallIcon(R.mipmap.ic_launcher) // Или android.R.drawable.ic_dialog_info
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setContentText("Connecting...")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            startForeground(
-                1337,
-                notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(1337, notification)
-        }
-
+        // ID уведомления 1337
+        startForeground(1337, notification)
 
         val config = intent?.getStringExtra("CONFIG") ?: return START_NOT_STICKY
         Thread { connectVpn(config) }.start()
 
         return START_STICKY
+    }
+
+    private fun createNotificationChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channelId = "ANetChannel"
+            val channelName = "ANet VPN Status"
+            val importance = NotificationManager.IMPORTANCE_LOW
+            val channel = android.app.NotificationChannel(channelId, channelName, importance)
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager?.createNotificationChannel(channel)
+        }
     }
 
     // Вызывается из Rust!
@@ -89,48 +97,48 @@ class ANetVpnService : VpnService() {
 
         // Этот вызов создает виртуальный интерфейс
         vpnInterface = builder.establish()
-
         return vpnInterface?.fd ?: -1
     }
 
-    // Вызывается из Rust!
+    // Колбэк из Rust
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
-
-        // 1. Обновляем уведомление (чтобы юзер видел в шторке)
         updateNotification(status)
 
-        // 2. Шлем в UI (MainActivity)
+        // Шлем статус в UI
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
-        // Используем LocalBroadcastManager (если есть) или обычный sendBroadcast
-        // Для Android Tiramisu+ (13) нужно указывать пакет для безопасности
-        intent.setPackage(packageName)
+        intent.setPackage(packageName) // Для безопасности на Android 13+
         sendBroadcast(intent)
     }
 
     private fun updateNotification(status: String) {
+        val notificationManager = getSystemService(NotificationManager::class.java)
         val notification = NotificationCompat.Builder(this, "ANetChannel")
             .setContentTitle("ANet VPN")
-            .setContentText(status) // <-- Текст из Rust
+            .setContentText(status)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .build()
-
-        // Обновляем уведомление (ID должен совпадать с startForeground)
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(1337, notification)
+        try {
+            notificationManager.notify(1337, notification)
+        } catch (e: SecurityException) {}
     }
 
-    private fun stopVpnNative() {
-        stopVpn()
-        vpnInterface?.close()
+    private fun stopVpnInternal() {
+        try {
+            vpnInterface?.close()
+        } catch (e: Exception) {
+            Log.e("ANet", "Error closing interface", e)
+        }
         vpnInterface = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
-        stopVpnNative()
+        // На случай если система убила сервис, пробуем почистить
+        stopVpnInternal()
         super.onDestroy()
     }
 }

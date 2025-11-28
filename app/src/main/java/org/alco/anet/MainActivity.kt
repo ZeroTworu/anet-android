@@ -16,43 +16,39 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import android.content.res.ColorStateList
+import android.graphics.Color
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
+    private lateinit var connectButton: Button
+
+    // Флаг текущего состояния
+    private var isVpnConnected = false
 
     companion object {
-        init {
-            System.loadLibrary("anet_mobile")
-        }
+        init { System.loadLibrary("anet_mobile") }
     }
 
     private external fun initLogger()
 
-    // Лаунчер для запроса прав на VPN
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            startVpnService()
-        }
+        if (result.resultCode == Activity.RESULT_OK) startVpnService()
     }
 
-    // Лаунчер для запроса прав на Уведомления (Android 13+)
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            // Права дали, можно пробовать VPN
-            attemptVpnConnection()
-        } else {
-            // Права не дали, пишем в лог, но VPN все равно пробуем (будет без уведомлений в шторке)
-            statusText.append("\nNotification permission denied. VPN might run silently.")
+    ) { isGranted ->
+        if (isGranted) attemptVpnConnection()
+        else {
+            statusText.append("\nNotification permission denied.")
             attemptVpnConnection()
         }
     }
 
-    // Приемник статусов от Сервиса
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val status = intent?.getStringExtra("status")
@@ -60,6 +56,13 @@ class MainActivity : AppCompatActivity() {
                 statusText.append("\n$it")
                 val scroll = findViewById<ScrollView>(R.id.scrollView)
                 scroll.post { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
+
+                // АВТОМАТИЧЕСКОЕ ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЯ ПО ЛОГАМ ИЗ RUST
+                when {
+                    it.contains("VPN Tunnel UP") -> setConnectedState(true)
+                    it.contains("VPN Stopped") -> setConnectedState(false)
+                    it.contains("Fatal Error") -> setConnectedState(false)
+                }
             }
         }
     }
@@ -68,36 +71,49 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText) // <-- Инициализируем поле
+        statusText = findViewById(R.id.statusText)
+        connectButton = findViewById(R.id.connect)
 
         initLogger()
 
-        // Регистрируем ресивер для получения логов
+        // Ресивер
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
-        // Для Android 13 (Tiramisu) и выше нужен флаг экспорта
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(statusReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(statusReceiver, filter)
         }
 
-        val btn = findViewById<Button>(R.id.connect)
-        btn.setOnClickListener {
-            checkPermissionsAndStart()
+        // Обработчик клика
+        connectButton.setOnClickListener {
+            if (isVpnConnected) {
+                // Если подключено -> жмем Stop
+                stopVpnService()
+            } else {
+                // Если отключено -> жмем Connect (с проверками)
+                checkPermissionsAndStart()
+            }
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        unregisterReceiver(statusReceiver)
+    // UI Свитчер
+    private fun setConnectedState(connected: Boolean) {
+        isVpnConnected = connected
+        runOnUiThread {
+            if (connected) {
+                connectButton.text = "Disconnect"
+                connectButton.backgroundTintList = ColorStateList.valueOf(Color.RED)
+            } else {
+                connectButton.text = "Connect"
+                connectButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50")) // Green
+            }
+        }
     }
 
-    // Шаг 1: Проверка прав на уведомления (только для Android 13+)
     private fun checkPermissionsAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
-
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
                 attemptVpnConnection()
@@ -107,23 +123,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Шаг 2: Проверка прав на VPN (системный диалог "Ключик")
     private fun attemptVpnConnection() {
         val intent = VpnService.prepare(this)
-        if (intent != null) {
-            // Прав нет, показываем диалог
-            vpnPermissionLauncher.launch(intent)
-        } else {
-            // Права есть, запускаем
-            startVpnService()
-        }
+        if (intent != null) vpnPermissionLauncher.launch(intent)
+        else startVpnService()
     }
 
-    // Шаг 3: Запуск сервиса
+    // ЗАПУСК
     private fun startVpnService() {
-        statusText.append("\nStarting Service...")
+        statusText.append("\n>>> Starting Service...")
         val intent = Intent(this, ANetVpnService::class.java)
-        intent.putExtra("CONFIG", """...""") // Твой конфиг
+        intent.action = ANetVpnService.ACTION_CONNECT
+        intent.putExtra("CONFIG", """...ТВОЙ_КОНФИГ...""")
         startForegroundService(intent)
+        // Кнопка переключится сама, когда придет "VPN Tunnel UP" от Rust
+    }
+
+    // ОСТАНОВКА
+    private fun stopVpnService() {
+        statusText.append("\n>>> Stopping Service...")
+        val intent = Intent(this, ANetVpnService::class.java)
+        intent.action = ANetVpnService.ACTION_STOP
+        startService(intent) // Для остановки можно обычный startService
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(statusReceiver)
     }
 }
