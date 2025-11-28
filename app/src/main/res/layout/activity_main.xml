@@ -43,4 +43,14 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <Button
+        android:id="@+id/selectConfig"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:text="⚙"
+        android:textSize="24sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="24dp" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

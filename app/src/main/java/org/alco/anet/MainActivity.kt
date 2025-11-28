@@ -18,20 +18,22 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.provider.OpenableColumns
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var connectButton: Button
 
+    // Config
+    private var selectedConfigContent: String? = null
+    private var selectedConfigName: String = "Unknown"
+
     // Флаг текущего состояния
     private var isVpnConnected = false
 
-    companion object {
-        init { System.loadLibrary("anet_mobile") }
-    }
-
-    private external fun initLogger()
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -72,9 +74,20 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.statusText)
+        val btnConnect = findViewById<Button>(R.id.connect)
+        val btnSelect = findViewById<Button>(R.id.selectConfig)
+
+        loadConfigFromPrefs()
+
+        if (selectedConfigContent != null) {
+            statusText.text = "Ready. Config loaded: $selectedConfigName"
+        } else {
+            statusText.text = "Welcome. Please select config file."
+        }
+
+        statusText = findViewById(R.id.statusText)
         connectButton = findViewById(R.id.connect)
 
-        initLogger()
 
         // Ресивер
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
@@ -84,8 +97,7 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(statusReceiver, filter)
         }
 
-        // Обработчик клика
-        connectButton.setOnClickListener {
+        btnConnect.setOnClickListener {
             if (isVpnConnected) {
                 // Если подключено -> жмем Stop
                 stopVpnService()
@@ -94,6 +106,11 @@ class MainActivity : AppCompatActivity() {
                 checkPermissionsAndStart()
             }
         }
+        btnSelect.setOnClickListener {
+            // Открываем пикер (ищем .toml или любые файлы)
+            filePickerLauncher.launch(arrayOf("text/plain", "application/toml", "application/octet-stream"))
+        }
+
     }
 
     // UI Свитчер
@@ -129,12 +146,99 @@ class MainActivity : AppCompatActivity() {
         else startVpnService()
     }
 
+
+    // Лаунчер выбора файла
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            val content = readTextFromUri(it)
+            val name = getFileName(it)
+
+            if (content.isNotEmpty()) {
+                selectedConfigContent = content
+                selectedConfigName = name
+
+                statusText.append("\nLoaded: $name (${content.length} bytes)")
+
+                // Сохраняем
+                saveConfigToPrefs(content, name)
+            } else {
+                statusText.append("\nFailed to read file")
+            }
+        }
+    }
+
+    // SharedPreferences Helpers
+    private fun saveConfigToPrefs(content: String, name: String) {
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("config_content", content)
+            .putString("config_name", name)
+            .apply()
+    }
+
+    private fun loadConfigFromPrefs() {
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val content = prefs.getString("config_content", null)
+        val name = prefs.getString("config_name", "client.toml")
+
+        if (content != null) {
+            selectedConfigContent = content
+            selectedConfigName = name ?: "Unknown"
+        }
+    }
+
+    // Чтение текста из URI
+    private fun readTextFromUri(uri: android.net.Uri): String {
+        return try {
+            contentResolver.openInputStream(uri)?.use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).readText()
+            } ?: ""
+        } catch (e: Exception) {
+            e.printStackTrace()
+            ""
+        }
+    }
+
+    // Получение имени файла из URI
+    private fun getFileName(uri: android.net.Uri): String {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    // Колонка DISPLAY_NAME
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) {
+                        result = cursor.getString(index)
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != null && cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result ?: "config.toml"
+    }
+
     // ЗАПУСК
     private fun startVpnService() {
+        val config = selectedConfigContent
+        if (config == null) {
+            statusText.append("\nError: No config selected!")
+            return
+        }
         statusText.append("\n>>> Starting Service...")
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
-        intent.putExtra("CONFIG", """...ТВОЙ_КОНФИГ...""")
+        intent.putExtra("CONFIG", config)
         startForegroundService(intent)
         // Кнопка переключится сама, когда придет "VPN Tunnel UP" от Rust
     }
