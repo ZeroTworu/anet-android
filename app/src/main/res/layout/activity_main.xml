@@ -1,56 +1,133 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="#121212"
     tools:context=".MainActivity">
 
-    <!-- Текстовое поле для логов -->
-    <!-- ScrollView позволяет прокручивать текст, если логов много -->
-    <ScrollView
-        android:id="@+id/scrollView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginBottom="16dp"
-        android:background="#EEE"
-        android:padding="8dp"
-        app:layout_constraintBottom_toTopOf="@+id/connect"
+    <!-- Шапка -->
+    <LinearLayout
+        android:id="@+id/header"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="32dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:id="@+id/logo"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="12dp"
+            android:src="@mipmap/ic_launcher" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ANet VPN"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:letterSpacing="0.05" />
+    </LinearLayout>
+
+    <!-- Настройки (Шестеренка справа сверху) -->
+    <Button
+        android:id="@+id/selectConfig"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_margin="16dp"
+        android:background="@android:color/transparent"
+        app:icon="@drawable/ic_settings"
+        app:iconTint="#FFFFFF"
+        app:iconSize="32dp"
+        app:iconGravity="textStart"
+        android:padding="0dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Главная кнопка -->
+    <ProgressBar
+        android:id="@+id/connectSpinner"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:indeterminate="true"
+        android:indeterminateTint="#00FF00"
+        android:visibility="invisible"
+        android:elevation="5dp"
+        app:layout_constraintBottom_toBottomOf="@+id/connect"
+        app:layout_constraintEnd_toEndOf="@+id/connect"
+        app:layout_constraintStart_toStartOf="@+id/connect"
+        app:layout_constraintTop_toTopOf="@+id/connect" />
+
+    <!-- Кнопка (200dp) -->
+    <Button
+        android:id="@+id/connect"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:text="CONNECT"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#4CAF50"
+        app:cornerRadius="100dp"
+        android:elevation="10dp"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintTop_toBottomOf="@+id/header"
+        app:layout_constraintVertical_bias="0.4" />
+
+    <!-- Статус текстом -->
+    <TextView
+        android:id="@+id/connectionStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="DISCONNECTED"
+        android:textColor="#FF5252"
+        android:textSize="16sp"
+        android:letterSpacing="0.1"
+        android:textStyle="bold"
+        app:layout_constraintTop_toBottomOf="@+id/connectSpinner"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Логи -->
+    <ScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:layout_marginBottom="24dp"
+        android:layout_marginHorizontal="16dp"
+        android:background="@null"
+        android:scrollbars="none"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
         <TextView
             android:id="@+id/statusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:text="Waiting for connection..."
+            android:text="> System ready..."
             android:textSize="12sp"
-            android:textColor="#000000" />
+            android:textColor="#00FF00"
+            android:background="@null"
+            android:shadowColor="#000000"
+            android:shadowDx="1"
+            android:shadowDy="1"
+            android:shadowRadius="1" />
     </ScrollView>
-
-    <Button
-        android:id="@+id/connect"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="32dp"
-        android:text="Connect"
-        android:backgroundTint="#4CAF50"
-        android:textColor="#FFFFFF"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <Button
-        android:id="@+id/selectConfig"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:text="⚙"
-        android:textSize="24sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="24dp" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
