@@ -29,7 +29,6 @@
             </intent-filter>
         </activity>
 
-        <!-- ВОТ ЧЕГО НЕ ХВАТАЛО: -->
         <service
             android:name=".ANetVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
