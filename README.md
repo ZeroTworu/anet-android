@@ -1,0 +1,1 @@
+Все issue открывайте в [основном](https://github.com/ZeroTworu/anet) проекте.
