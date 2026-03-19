@@ -34,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectConfigButton: Button
     private lateinit var scrollView: ScrollView
 
+    private lateinit var selectAppsButton: Button
+
     // Состояние
     private var selectedConfigContent: String? = null
     private var selectedConfigName: String = "Unknown"
@@ -137,6 +139,11 @@ class MainActivity : AppCompatActivity() {
         selectConfigButton = findViewById(R.id.selectConfig)
         scrollView = findViewById(R.id.scrollView)
 
+        selectAppsButton = findViewById(R.id.selectApps)
+        selectAppsButton.setOnClickListener {
+            startActivity(Intent(this, AppSelectionActivity::class.java))
+        }
+
         initLogger()
 
         // Загрузка сохраненного конфига
@@ -213,6 +220,13 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
         intent.putExtra("CONFIG", selectedConfigContent)
+
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val appsSet = prefs.getStringSet("allowed_apps", emptySet())
+        if (!appsSet.isNullOrEmpty()) {
+            intent.putStringArrayListExtra("ALLOWED_APPS", ArrayList(appsSet))
+        }
+
         startForegroundService(intent)
     }
 

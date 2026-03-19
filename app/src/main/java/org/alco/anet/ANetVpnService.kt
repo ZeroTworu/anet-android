@@ -12,6 +12,7 @@ import java.net.InetAddress
 class ANetVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
+    private var allowedAppsCache: List<String> = emptyList()
 
     companion object {
         init {
@@ -53,6 +54,9 @@ class ANetVpnService : VpnService() {
         startForeground(1337, notification)
 
         val config = intent?.getStringExtra("CONFIG") ?: return START_NOT_STICKY
+
+        allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
+
         Thread { connectVpn(config) }.start()
 
         return START_STICKY
@@ -88,7 +92,24 @@ class ANetVpnService : VpnService() {
         builder.addAddress(ip, prefix)
         builder.setMtu(mtu)
         builder.setSession("ANet VPN")
-        try { builder.addDisallowedApplication(packageName) } catch (e: Exception) {}
+
+        if (allowedAppsCache.isNotEmpty()) {
+            // SPLIT TUNNELING
+            Log.i("ANet", "Per-App Mode ON. Allowing ${allowedAppsCache.size} specific apps.")
+            onStatusChanged("App Split: Only specific apps use VPN")
+            for (pkg in allowedAppsCache) {
+                try {
+                    builder.addAllowedApplication(pkg)
+                } catch (e: Exception) {
+                    Log.e("ANet", "Package $pkg not found, skipping", e)
+                }
+            }
+        } else {
+            // Режим Global: Работают ВСЕ, поэтому исключаем сам VPN-клиент чтобы не зациклило
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) { Log.e("ANet", "$e", e)}
+        }
 
         // DNS
         if (dnsServers.isNotEmpty()) {
@@ -177,6 +198,8 @@ class ANetVpnService : VpnService() {
             onStatusChanged("excludeRoute Not Supported")
         }
     }
+
+
 
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
