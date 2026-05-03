@@ -1,9 +1,21 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.ANet" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    <!-- Основная тема приложения -->
+    <style name="Theme.ANet" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">#121212</item>
+        <item name="alertDialogTheme">@style/Theme.ANet.Dialog</item>
     </style>
 
-    <style name="Theme.ANet" parent="Base.Theme.ANet" />
+    <!-- Тема для диалога в стиле Half-Life -->
+    <style name="Theme.ANet.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="android:windowBackground">#202020</item> <!-- Темно-серый фон -->
+        <item name="colorSurface">#202020</item>
+        <item name="android:textColor">#FF6400</item> <!-- Оранжевый текст -->
+        <item name="android:textColorPrimary">#FF6400</item>
+        <item name="buttonBarPositiveButtonStyle">@style/ANet.Button.Text</item>
+    </style>
+
+    <style name="ANet.Button.Text" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">#FF6400</item>
+    </style>
 </resources>
+

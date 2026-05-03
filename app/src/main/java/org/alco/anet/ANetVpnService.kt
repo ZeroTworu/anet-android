@@ -7,7 +7,10 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import android.app.NotificationManager
+import android.os.Build
+import android.os.Build.*
 import java.net.InetAddress
+import android.content.pm.ServiceInfo
 
 class ANetVpnService : VpnService() {
 
@@ -51,7 +54,12 @@ class ANetVpnService : VpnService() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        startForeground(1337, notification)
+
+        if (VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34+
+            startForeground(1337, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1337, notification)
+        }
 
         val config = intent?.getStringExtra("CONFIG") ?: return START_NOT_STICKY
 
@@ -63,7 +71,7 @@ class ANetVpnService : VpnService() {
     }
 
     private fun createNotificationChannel() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (VERSION.SDK_INT >= VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 "ANetChannel", "ANet VPN Status", NotificationManager.IMPORTANCE_LOW
             )
@@ -133,7 +141,7 @@ class ANetVpnService : VpnService() {
 
             if (excludeRoutes.isNotEmpty()) {
                 // Пытаемся использовать нативный Exclude (Android 13+)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
                     Log.i("ANet", "Using Native Android 13 Exclusions")
                     // Добавляем весь мир
                     builder.addRoute("0.0.0.0", 0)
@@ -181,7 +189,7 @@ class ANetVpnService : VpnService() {
     // Доступно только на API 33+ (проверка вызова делается снаружи или через аннотацию,
     // но в Kotlin можно просто проверить SDK_INT выше)
     private fun excludeRouteSafely(builder: Builder, routeStr: String) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
             try {
                 val parts = routeStr.trim().split("/")
                 if (parts.size == 2) {
@@ -204,8 +212,15 @@ class ANetVpnService : VpnService() {
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
         updateNotification(status)
+
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
+
+        if (status.contains("ERROR", ignoreCase = true) ||
+            status.contains("[CORE AUTH]", ignoreCase = true)) {
+            intent.putExtra("is_error", true)
+        }
+
         intent.setPackage(packageName)
         sendBroadcast(intent)
     }

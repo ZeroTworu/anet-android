@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scrollView: ScrollView
 
     private lateinit var selectAppsButton: Button
+    private var activeErrorDialog: androidx.appcompat.app.AlertDialog? = null
 
     // Состояние
     private var selectedConfigContent: String? = null
@@ -95,6 +96,40 @@ class MainActivity : AppCompatActivity() {
         attemptVpnConnection()
     }
 
+    private fun showErrorDialog(message: String) {
+        runOnUiThread {
+            // Если диалог уже показан — ничего не делаем
+            if (activeErrorDialog?.isShowing == true) {
+                return@runOnUiThread
+            }
+
+            val builder = androidx.appcompat.app.AlertDialog.Builder(this)
+            builder.setTitle("ОШИБКА ДОСТУПА")
+
+            val cleanMsg = message
+                .replace("ERROR:", "")
+                .replace("WARN:", "")
+                .replace("[CORE AUTH]", "")
+                .replace(Regex("\\[AUTH\\].*failed:"), "") // Убираем инфу про попытку (attempt X)
+                .trim()
+
+            builder.setMessage(cleanMsg)
+            builder.setPositiveButton("ПОНЯТНО") { dialog, _ ->
+                dialog.dismiss()
+                activeErrorDialog = null // Очищаем ссылку при закрытии
+            }
+
+            // Если юзер ткнул мимо окна — тоже очищаем
+            builder.setOnCancelListener { activeErrorDialog = null }
+
+            activeErrorDialog = builder.create()
+            activeErrorDialog?.show()
+
+            activeErrorDialog?.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                ?.setTextColor(Color.parseColor("#FF6400"))
+        }
+    }
+
     // --- BROADCAST RECEIVER ---
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -103,8 +138,18 @@ class MainActivity : AppCompatActivity() {
             status?.let { msg ->
                 logToConsole(msg)
 
-                // Логика переключения состояний на основе сообщений от Rust
+                // Проверяем на критические ошибки тарифа
+                val isAuthError = msg.contains("сессий", ignoreCase = true) ||
+                        msg.contains("истекло", ignoreCase = true) ||
+                        msg.contains("denied", ignoreCase = true)
+
                 when {
+                    isAuthError -> {
+                        stopVpnService()
+                        setUiState(State.DISCONNECTED)
+                        showErrorDialog(msg)
+                    }
+
                     msg.contains("Starting", ignoreCase = true) ||
                             msg.contains("Authenticating", ignoreCase = true) ||
                             msg.contains("Connecting", ignoreCase = true) -> {
@@ -115,7 +160,7 @@ class MainActivity : AppCompatActivity() {
                         setUiState(State.CONNECTED)
                     }
 
-                    msg.contains("VPN Stopped", ignoreCase = true) ||
+                    msg.contains("Stopped", ignoreCase = true) ||
                             msg.contains("Error", ignoreCase = true) ||
                             msg.contains("Failed", ignoreCase = true) -> {
                         setUiState(State.DISCONNECTED)
@@ -201,6 +246,28 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             attemptVpnConnection()
+        }
+    }
+
+    private fun showAccessDeniedDialog(message: String) {
+        runOnUiThread {
+            // Чтобы диалог выглядел в стиле HL (черный/оранжевый),
+            // мы используем MaterialAlertDialogBuilder или кастомную тему
+            val builder = androidx.appcompat.app.AlertDialog.Builder(this)
+
+            // Настраиваем заголовок и текст (можешь добавить иконку радиации в ресурсы)
+            builder.setTitle("ОШИБКА ДОСТУПА")
+            builder.setMessage(message)
+
+            builder.setPositiveButton("ПОНЯТНО (OK)") { dialog, _ ->
+                dialog.dismiss()
+            }
+
+            val dialog = builder.create()
+            dialog.show()
+
+            // Стилизация кнопок программно (чтобы не ковырять XML)
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setTextColor(Color.parseColor("#FF6400"))
         }
     }
 
