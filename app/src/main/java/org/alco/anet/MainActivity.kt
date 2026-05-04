@@ -23,6 +23,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import androidx.core.content.FileProvider
+import androidx.annotation.Keep
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,7 +43,22 @@ class MainActivity : AppCompatActivity() {
     // Состояние
     private var selectedConfigContent: String? = null
     private var selectedConfigName: String = "Unknown"
+    private var isCheckingUpdates = false
     private var isVpnConnected = false
+    private var updateDialog: androidx.appcompat.app.AlertDialog? = null
+    private var progressBar: ProgressBar? = null
+
+    private external fun getAppVersion(): String
+
+    private external fun getBuildInfo(): String
+
+    private external fun checkUpdates(config: String?)
+
+    private external fun startDownload(path: String)
+
+    private external fun getPendingTag(): String
+
+    private external fun getPendingBody(): String
 
     // Enum для состояний UI
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
@@ -52,6 +70,69 @@ class MainActivity : AppCompatActivity() {
     }
 
     private external fun initLogger()
+
+
+    //  Метод установки
+    private fun installApk() {
+        val apkFile = File(cacheDir, "update.apk")
+        val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", apkFile)
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    //  Красивая модалка обновления
+    private fun showUpdateModal(version: String, body: String) {
+        runOnUiThread {
+            // Если диалог уже открыт — не плодим новые
+            if (updateDialog?.isShowing == true) return@runOnUiThread
+
+            val builder = androidx.appcompat.app.AlertDialog.Builder(this)
+
+            // Надуваем нашу разметку
+            val dialogView = layoutInflater.inflate(R.layout.dialog_update, null)
+
+            // Ищем элементы ВНУТРИ dialogView
+            val titleView = dialogView.findViewById<TextView>(R.id.updateTitle)
+            val versionView = dialogView.findViewById<TextView>(R.id.updateVersion)
+            val changelogView = dialogView.findViewById<TextView>(R.id.updateChangelog)
+            val btnUpdate = dialogView.findViewById<Button>(R.id.btnUpdateNow)
+            val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelUpdate)
+
+            // Сохраняем ссылку на прогресс-бар в поле класса MainActivity,
+            // чтобы обновлять его из statusReceiver
+            progressBar = dialogView.findViewById<ProgressBar>(R.id.updateProgress)
+
+            versionView.text = "Version: $version"
+            changelogView.text = body
+
+            builder.setView(dialogView)
+            builder.setCancelable(false) // Чтобы идиот не закрыл случайно
+
+            updateDialog = builder.create()
+            updateDialog?.show()
+
+            btnCancel.setOnClickListener {
+                updateDialog?.dismiss()
+            }
+
+            btnUpdate.setOnClickListener {
+                btnUpdate.isEnabled = false
+                btnCancel.isEnabled = false
+                progressBar?.visibility = View.VISIBLE
+
+                logToConsole("Starting APK download...")
+                // Скачиваем во внутренний кэш приложения
+                val destination = File(cacheDir, "update.apk").absolutePath
+                startDownload(destination)
+            }
+        }
+    }
+
 
     // --- LAUNCHERS ---
 
@@ -135,7 +216,30 @@ class MainActivity : AppCompatActivity() {
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val status = intent?.getStringExtra("status")
-            status?.let { msg ->
+
+            if (status == null) return
+
+            if (status.contains("Найдено обновление") ||
+                status.contains("актуальная версия") ||
+                status.contains("Ошибка обновления")) {
+                isCheckingUpdates = false
+                val btnUpdate = findViewById<Button>(R.id.btnCheckUpdate)
+                btnUpdate.isEnabled = true
+                btnUpdate.alpha = 1.0f
+            }
+
+            status.let { msg ->
+                // 1. Ловим прогресс обновления (чтобы не спамить в логи, обрабатываем отдельно)
+                if (msg.startsWith("PROGRESS:")) {
+                    val progressValue = msg.substringAfter("PROGRESS:").toFloatOrNull() ?: 0f
+                    runOnUiThread {
+                        progressBar?.isIndeterminate = false
+                        progressBar?.progress = (progressValue * 100).toInt()
+                    }
+                    return // Выходим из функции, прогресс в консоль логов не пишем
+                }
+
+                // 2. Печатаем все остальные сообщения в консоль логов
                 logToConsole(msg)
 
                 // Проверяем на критические ошибки тарифа
@@ -144,12 +248,28 @@ class MainActivity : AppCompatActivity() {
                         msg.contains("denied", ignoreCase = true)
 
                 when {
+                    // --- ОБНОВЛЕНИЯ ---
+                    msg.contains("Найдено обновление", ignoreCase = true) -> {
+                        // Показываем модалку (текст можно распарсить из msg, если нужно)
+                        val tag = getPendingTag()
+                        val body = getPendingBody()
+                        showUpdateModal(tag, body)
+                    }
+
+                    msg.contains("Update downloaded to cache", ignoreCase = true) -> {
+                        // Когда Rust сказал, что файл на диске
+                        updateDialog?.dismiss()
+                        installApk()
+                    }
+
+                    // --- ОШИБКИ ТАРИФА ---
                     isAuthError -> {
                         stopVpnService()
                         setUiState(State.DISCONNECTED)
                         showErrorDialog(msg)
                     }
 
+                    // --- СОСТОЯНИЯ ПОДКЛЮЧЕНИЯ ---
                     msg.contains("Starting", ignoreCase = true) ||
                             msg.contains("Authenticating", ignoreCase = true) ||
                             msg.contains("Connecting", ignoreCase = true) -> {
@@ -222,6 +342,43 @@ class MainActivity : AppCompatActivity() {
 
         // Начальное состояние
         setUiState(State.DISCONNECTED)
+
+        findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
+        findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
+
+        val btnUpdate = findViewById<Button>(R.id.btnCheckUpdate)
+        btnUpdate.setOnClickListener {
+            if (isCheckingUpdates) return@setOnClickListener
+
+            isCheckingUpdates = true
+            btnUpdate.isEnabled = false
+            btnUpdate.alpha = 0.5f
+
+            logToConsole("Checking for system updates...")
+
+            Thread {
+                try {
+                    // Передаем текущий контент конфига в Rust
+                    checkUpdates(selectedConfigContent)
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        isCheckingUpdates = false
+                        btnUpdate.isEnabled = true
+                        btnUpdate.alpha = 1.0f
+                        logToConsole("Update check error: ${e.message}")
+                    }
+                }
+            }.start()
+        }
+    }
+
+    @Keep
+    fun onStatusChanged(status: String) {
+        // Мы просто пересылаем это сообщение самим себе через ту же систему Broadcast
+        val intent = Intent("org.alco.anet.VPN_STATUS")
+        intent.putExtra("status", status)
+        intent.setPackage(packageName)
+        sendBroadcast(intent)
     }
 
     override fun onDestroy() {

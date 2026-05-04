@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Разрешаем доступ к кэш-папке, куда Rust скачает APK -->
+    <cache-path name="my_updates" path="." />
+</paths>

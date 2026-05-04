@@ -9,6 +9,48 @@
     android:background="#121212"
     tools:context=".MainActivity">
 
+    <!-- Блок информации о сборке -->
+    <LinearLayout
+        android:id="@+id/buildInfoBlock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:background="#1A1A1A"
+        app:layout_constraintBottom_toTopOf="@+id/scrollView">
+
+        <TextView
+            android:id="@+id/versionLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VERSION: v0.0.0 (32)"
+            android:textColor="#FF6400"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/buildDetailLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Type: CI/CD | Time: 1989-05-01..."
+            android:textColor="#888888"
+            android:textSize="10sp"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- Кнопка проверки обновлений (маленькая, рядом с шестеренкой) -->
+    <Button
+        android:id="@+id/btnCheckUpdate"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@android:color/transparent"
+        app:icon="@android:drawable/stat_sys_download"
+        app:iconTint="#888888"
+        app:layout_constraintEnd_toStartOf="@+id/selectApps"
+        app:layout_constraintTop_toTopOf="@+id/selectConfig" />
+
     <!-- Шапка -->
     <LinearLayout
         android:id="@+id/header"
