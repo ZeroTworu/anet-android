@@ -451,7 +451,7 @@ class MainActivity : AppCompatActivity() {
             intent.putStringArrayListExtra("ALLOWED_APPS", ArrayList(appsSet))
         }
 
-        startForegroundService(intent)
+        ContextCompat.startForegroundService(this, intent)
     }
 
     private fun stopVpnService() {
