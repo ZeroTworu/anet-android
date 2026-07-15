@@ -37,7 +37,7 @@ import java.net.URL
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val name: String?, val address: String, val mode: String) {
-    fun getFormattedName(): String { // <-- Переименовали метод
+    fun getFormattedName(): String {
         if (!name.isNullOrBlank()) return name
         val ip = address.split(":").firstOrNull() ?: address
         return "$ip:${mode.uppercase()}"
@@ -46,6 +46,7 @@ data class ServerModel(val name: String?, val address: String, val mode: String)
 
 class MainActivity : AppCompatActivity() {
 
+    // UI Элементы
     private lateinit var statusText: TextView
     private lateinit var connectionStatusLabel: TextView
     private lateinit var connectButton: Button
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectAppsButton: Button
     private var activeErrorDialog: androidx.appcompat.app.AlertDialog? = null
 
+    // Состояние
     private var selectedConfigContent: String? = null
     private var selectedConfigName: String = "Unknown"
     private var isCheckingUpdates = false
@@ -76,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private external fun getPendingTag(): String
     private external fun getPendingBody(): String
 
+    // Enum для состояний UI
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
 
     companion object {
@@ -86,6 +89,7 @@ class MainActivity : AppCompatActivity() {
 
     private external fun initLogger()
 
+    // Метод установки скачанного APK
     private fun installApk() {
         val apkFile = File(cacheDir, "update.apk")
         val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", apkFile)
@@ -98,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+    // Красивая модалка обновления
     private fun showUpdateModal(version: String, body: String) {
         runOnUiThread {
             if (updateDialog?.isShowing == true) return@runOnUiThread
@@ -137,11 +142,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- ЛЕГКОВЕСНЫЙ REGEX ПАРСЕР СЕРВЕРОВ (TOML) ---
+    // --- БЕЗОПАСНЫЙ TOML-ПАРСЕР СЕРВЕРОВ ---
     private fun parseServers(toml: String): List<ServerModel> {
         val servers = mutableListOf<ServerModel>()
-
-        // Разделяем TOML по блокам серверов
         val parts = toml.split("[[servers]]")
         if (parts.size <= 1) return emptyList()
 
@@ -150,12 +153,10 @@ class MainActivity : AppCompatActivity() {
             var sAddr: String? = null
             var sMode: String? = null
 
-            // Читаем блок построчно
+            // Читаем блок построчно, игнорируя брэкеты внутри строковых литералов
             for (line in parts[i].lines()) {
                 val trimmed = line.trim()
 
-                // Если строка начинается с [ (и это не массив [[servers) — значит, мы дошли
-                // до следующей секции (например, [keys]) и текущий блок серверов закончен.
                 if (trimmed.startsWith("[") && !trimmed.startsWith("[[servers")) {
                     break
                 }
@@ -176,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         return servers
     }
 
-    // Заполнение Spinner-а доступными серверами
+    // Инициализация выпадающего меню серверов с кастомной оранжевой разметкой
     private fun setupServerSpinner() {
         val content = selectedConfigContent ?: return
         availableServers.clear()
@@ -190,15 +191,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         serverSelectSpinner.visibility = View.VISIBLE
-
-        // Используем наши новые оранжевые XML шаблоны
         val adapter = ArrayAdapter(
             this,
-            R.layout.spinner_dropdown_item, // <-- Заменили системный шаблон
+            R.layout.spinner_dropdown_item,
             availableServers.map { it.getFormattedName() }
         )
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item) // <-- Заменили системный шаблон
-
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         serverSelectSpinner.adapter = adapter
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
@@ -216,13 +214,13 @@ class MainActivity : AppCompatActivity() {
                 val name = availableServers[position].getFormattedName()
                 selectedServerName = name
                 prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
-                logToConsole("Выбрана нода: $name")
+                logToConsole("Приоритетный сервер: $name")
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
-    // --- БЕЗБОЛЕЗНЕННЫЙ QR СКАНЕР И DOWNLOADER ---
+    // --- Google Barcode Scanner (ML Kit) ---
     private fun startQrScanner() {
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
@@ -265,10 +263,8 @@ class MainActivity : AppCompatActivity() {
                             spinner.visibility = View.INVISIBLE
                             logToConsole("Профиль импортирован по QR-коду!")
 
-                            // 1. Инициализируем выбор серверов
                             setupServerSpinner()
 
-                            // Сразу запускаем автоматическое подключение туннеля
                             logToConsole(">>> Автозапуск соединения...")
                             checkPermissionsAndStart()
                         }
@@ -295,6 +291,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- LAUNCHERS ---
 
+    // Выбор файла через проводник
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -314,6 +311,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Права VPN
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -325,6 +323,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Права Уведомлений
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -467,6 +466,7 @@ class MainActivity : AppCompatActivity() {
             logToConsole("Welcome. Please select config file.")
         }
 
+        // Регистрация ресивера с помощью безопасного метода Jetpack ContextCompat
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
         ContextCompat.registerReceiver(
             this,
@@ -496,13 +496,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
-        val btnUpdate = findViewById<Button>(R.id.btnCheckUpdate)
-        btnUpdate.setOnClickListener {
+        val btnCheckUpdate = findViewById<Button>(R.id.btnCheckUpdate)
+        btnCheckUpdate.setOnClickListener {
             if (isCheckingUpdates) return@setOnClickListener
 
             isCheckingUpdates = true
-            btnUpdate.isEnabled = false
-            btnUpdate.alpha = 0.5f
+            btnCheckUpdate.isEnabled = false
+            btnCheckUpdate.alpha = 0.5f
 
             logToConsole("Checking for system updates...")
 
@@ -512,12 +512,43 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     runOnUiThread {
                         isCheckingUpdates = false
-                        btnUpdate.isEnabled = true
-                        btnUpdate.alpha = 1.0f
+                        btnCheckUpdate.isEnabled = true
+                        btnCheckUpdate.alpha = 1.0f
                         logToConsole("Update check error: ${e.message}")
                     }
                 }
             }.start()
+        }
+
+        // Проверяем, было ли запущено приложение через открытие .toml файла извне
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val action = intent?.action
+        val data = intent?.data
+
+        if (Intent.ACTION_VIEW == action && data != null) {
+            logToConsole("Импорт конфигурации из внешнего источника...")
+            val content = readTextFromUri(data)
+            val name = getFileName(data)
+
+            if (content.isNotEmpty() && content.contains("[main]") && content.contains("[keys]")) {
+                selectedConfigContent = content
+                selectedConfigName = name
+                saveConfigToPrefs(content, name)
+
+                logToConsole("Конфигурация успешно импортирована: $name")
+                setupServerSpinner()
+            } else {
+                logToConsole("Ошибка импорта: Некорректный файл .toml")
+            }
         }
     }
 
@@ -570,7 +601,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
         intent.putExtra("CONFIG", selectedConfigContent)
-        intent.putExtra("SELECTED_SERVER", selectedServerName) // Передаем приоритетный сервер
+        intent.putExtra("SELECTED_SERVER", selectedServerName) // Передаем приоритетную ноду
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         val appsSet = prefs.getStringSet("allowed_apps", emptySet())
@@ -605,7 +636,6 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.text = "Now you are Disconnected to VPN"
                     connectionStatusLabel.setTextColor(0xFFFF5252.toInt())
 
-                    // Разрешаем выбор ноды при отключенном VPN
                     serverSelectSpinner.isEnabled = true
                 }
                 State.CONNECTING -> {
@@ -618,7 +648,6 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.text = "WORKING..."
                     connectionStatusLabel.setTextColor(0xFFFFC107.toInt())
 
-                    // Блокируем выбор ноды при подключении
                     serverSelectSpinner.isEnabled = false
                 }
                 State.CONNECTED -> {
@@ -632,7 +661,6 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.text = "Now you are connected to VPN"
                     connectionStatusLabel.setTextColor(0xFF4CAF50.toInt())
 
-                    // Блокируем выбор ноды при активном соединении
                     serverSelectSpinner.isEnabled = false
                 }
             }
