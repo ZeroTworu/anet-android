@@ -2,7 +2,7 @@ package org.alco.anet
 
 import android.content.Intent
 import android.net.VpnService
-import android.net.IpPrefix // API 33+
+import android.net.IpPrefix
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -11,11 +11,17 @@ import android.os.Build
 import android.os.Build.*
 import java.net.InetAddress
 import android.content.pm.ServiceInfo
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 
 class ANetVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var allowedAppsCache: List<String> = emptyList()
+
+    private lateinit var connectivityManager: ConnectivityManager
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     companion object {
         init {
@@ -33,6 +39,7 @@ class ANetVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         initLogger()
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -65,6 +72,9 @@ class ANetVpnService : VpnService() {
 
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
 
+        // Начинаем слушать изменения сети при старте VPN
+        registerNetworkCallback()
+
         Thread { connectVpn(config) }.start()
 
         return START_STICKY
@@ -77,6 +87,43 @@ class ANetVpnService : VpnService() {
             )
             val nm = getSystemService(NotificationManager::class.java)
             nm?.createNotificationChannel(channel)
+        }
+    }
+
+    // Регистрация коллбека мониторинга сети
+    private fun registerNetworkCallback() {
+        if (networkCallback == null) {
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    super.onAvailable(network)
+                    Log.i("ANet", "Active physical network switched to: $network")
+                    // Сообщаем системе использовать текущую активную сеть для вывода трафика VPN
+                    setUnderlyingNetworks(arrayOf(network))
+                }
+
+                override fun onLost(network: Network) {
+                    super.onLost(network)
+                    Log.i("ANet", "Physical network lost: $network")
+                    // Сбрасываем в null, заставляя ОС переключиться на резервный канал
+                    setUnderlyingNetworks(null)
+                }
+            }
+            try {
+                connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+            } catch (e: Exception) {
+                Log.e("ANet", "Failed to register default network callback", e)
+            }
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let {
+            try {
+                connectivityManager.unregisterNetworkCallback(it)
+            } catch (e: Exception) {
+                Log.e("ANet", "Failed to unregister network callback", e)
+            }
+            networkCallback = null
         }
     }
 
@@ -102,7 +149,6 @@ class ANetVpnService : VpnService() {
         builder.setSession("ANet VPN")
 
         if (allowedAppsCache.isNotEmpty()) {
-            // SPLIT TUNNELING
             Log.i("ANet", "Per-App Mode ON. Allowing ${allowedAppsCache.size} specific apps.")
             onStatusChanged("App Split: Only specific apps use VPN")
             for (pkg in allowedAppsCache) {
@@ -113,7 +159,6 @@ class ANetVpnService : VpnService() {
                 }
             }
         } else {
-            // Режим Global: Работают ВСЕ, поэтому исключаем сам VPN-клиент чтобы не зациклило
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (e: Exception) { Log.e("ANet", "$e", e)}
@@ -132,36 +177,27 @@ class ANetVpnService : VpnService() {
 
         // ROUTING LOGIC
         if (includeRoutes.isNotEmpty()) {
-            // Mode 1: Whitelist
             Log.i("ANet", "Mode: INCLUDE (Split Tunneling)")
             includeRoutes.split(",").forEach { addRouteSafely(builder, it) }
         } else {
-            // Mode 2: Global / Blacklist
             Log.i("ANet", "Mode: GLOBAL/EXCLUDE")
 
             if (excludeRoutes.isNotEmpty()) {
-                // Пытаемся использовать нативный Exclude (Android 13+)
                 if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
                     Log.i("ANet", "Using Native Android 13 Exclusions")
-                    // Добавляем весь мир
                     builder.addRoute("0.0.0.0", 0)
-                    // Исключаем ненужное
                     excludeRoutes.split(",").forEach { excludeRouteSafely(builder, it) }
                     builder.addRoute("128.0.0.0", 1)
                 } else {
-                    // Эмуляция для старых Android
                     Log.i("ANet", "Legacy Android: Using Calculated Fallback Routes")
                     if (fallbackRoutes.isNotEmpty()) {
-                        // Rust уже посчитал "Весь мир минус Исключения"
                         fallbackRoutes.split(",").forEach { addRouteSafely(builder, it) }
                     } else {
-                        // Если Rust не смог посчитать (или что-то пошло не так), фоллбек на Full VPN
                         Log.w("ANet", "Fallback empty! Defaulting to Full VPN.")
                         builder.addRoute("0.0.0.0", 0)
                     }
                 }
             } else {
-                // Чистый Global VPN без исключений
                 builder.addRoute("0.0.0.0", 0)
             }
         }
@@ -186,8 +222,6 @@ class ANetVpnService : VpnService() {
         }
     }
 
-    // Доступно только на API 33+ (проверка вызова делается снаружи или через аннотацию,
-    // но в Kotlin можно просто проверить SDK_INT выше)
     private fun excludeRouteSafely(builder: Builder, routeStr: String) {
         if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
             try {
@@ -206,8 +240,6 @@ class ANetVpnService : VpnService() {
             onStatusChanged("excludeRoute Not Supported")
         }
     }
-
-
 
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
@@ -237,10 +269,19 @@ class ANetVpnService : VpnService() {
     }
 
     private fun stopVpnInternal() {
+        unregisterNetworkCallback() // Отключаем слушатель сети
         try { vpnInterface?.close() } catch (e: Exception) {}
         vpnInterface = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    override fun onRevoke() {
+        // Вызывается системой, если VPN-права отозваны или выданы другому приложению
+        Log.i("ANet", "VPN Service Revoked by System")
+        stopVpn()
+        stopVpnInternal()
+        super.onRevoke()
     }
 
     override fun onDestroy() {
