@@ -257,7 +257,6 @@ class MainActivity : AppCompatActivity() {
                 if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                     val content = connection.inputStream.bufferedReader().use { it.readText() }
 
-                    // Простая проверка структуры
                     if (content.contains("[main]") && content.contains("[keys]")) {
                         runOnUiThread {
                             selectedConfigContent = content
@@ -265,7 +264,13 @@ class MainActivity : AppCompatActivity() {
                             saveConfigToPrefs(content, "QR-Imported")
                             spinner.visibility = View.INVISIBLE
                             logToConsole("Профиль импортирован по QR-коду!")
+
+                            // 1. Инициализируем выбор серверов
                             setupServerSpinner()
+
+                            // Сразу запускаем автоматическое подключение туннеля
+                            logToConsole(">>> Автозапуск соединения...")
+                            checkPermissionsAndStart()
                         }
                     } else {
                         runOnUiThread {
