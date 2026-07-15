@@ -33,7 +33,7 @@ class ANetVpnService : VpnService() {
 
     // Native methods
     private external fun initLogger()
-    private external fun connectVpn(config: String)
+    private external fun connectVpn(config: String, selectedServer: String)
     private external fun stopVpn()
 
     override fun onCreate() {
@@ -69,13 +69,14 @@ class ANetVpnService : VpnService() {
         }
 
         val config = intent?.getStringExtra("CONFIG") ?: return START_NOT_STICKY
+        val selectedServer = intent?.getStringExtra("SELECTED_SERVER") ?: ""
 
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
 
         // Начинаем слушать изменения сети при старте VPN
         registerNetworkCallback()
 
-        Thread { connectVpn(config) }.start()
+        Thread { connectVpn(config, selectedServer) }.start()
 
         return START_STICKY
     }

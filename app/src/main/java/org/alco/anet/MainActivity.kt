@@ -14,9 +14,12 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -25,22 +28,36 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import androidx.core.content.FileProvider
 import androidx.annotation.Keep
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+
+// Вспомогательная структура данных для парсинга нод в Kotlin
+data class ServerModel(val name: String?, val address: String, val mode: String) {
+    fun getFormattedName(): String { // <-- Переименовали метод
+        if (!name.isNullOrBlank()) return name
+        val ip = address.split(":").firstOrNull() ?: address
+        return "$ip:${mode.uppercase()}"
+    }
+}
 
 class MainActivity : AppCompatActivity() {
 
-    // UI Элементы
     private lateinit var statusText: TextView
     private lateinit var connectionStatusLabel: TextView
     private lateinit var connectButton: Button
     private lateinit var spinner: ProgressBar
     private lateinit var selectConfigButton: Button
     private lateinit var scrollView: ScrollView
+    private lateinit var btnScanQr: Button
+    private lateinit var serverSelectSpinner: Spinner
 
     private lateinit var selectAppsButton: Button
     private var activeErrorDialog: androidx.appcompat.app.AlertDialog? = null
 
-    // Состояние
     private var selectedConfigContent: String? = null
     private var selectedConfigName: String = "Unknown"
     private var isCheckingUpdates = false
@@ -48,19 +65,17 @@ class MainActivity : AppCompatActivity() {
     private var updateDialog: androidx.appcompat.app.AlertDialog? = null
     private var progressBar: ProgressBar? = null
 
+    // Список распарсенных нод из активного конфига
+    private val availableServers = mutableListOf<ServerModel>()
+    private var selectedServerName: String = ""
+
     private external fun getAppVersion(): String
-
     private external fun getBuildInfo(): String
-
     private external fun checkUpdates(config: String?)
-
     private external fun startDownload(path: String)
-
     private external fun getPendingTag(): String
-
     private external fun getPendingBody(): String
 
-    // Enum для состояний UI
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
 
     companion object {
@@ -71,8 +86,6 @@ class MainActivity : AppCompatActivity() {
 
     private external fun initLogger()
 
-
-    //  Метод установки
     private fun installApk() {
         val apkFile = File(cacheDir, "update.apk")
         val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", apkFile)
@@ -85,33 +98,25 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    //  Красивая модалка обновления
     private fun showUpdateModal(version: String, body: String) {
         runOnUiThread {
-            // Если диалог уже открыт — не плодим новые
             if (updateDialog?.isShowing == true) return@runOnUiThread
 
             val builder = androidx.appcompat.app.AlertDialog.Builder(this)
-
-            // Надуваем нашу разметку
             val dialogView = layoutInflater.inflate(R.layout.dialog_update, null)
 
-            // Ищем элементы ВНУТРИ dialogView
-            val titleView = dialogView.findViewById<TextView>(R.id.updateTitle)
             val versionView = dialogView.findViewById<TextView>(R.id.updateVersion)
             val changelogView = dialogView.findViewById<TextView>(R.id.updateChangelog)
             val btnUpdate = dialogView.findViewById<Button>(R.id.btnUpdateNow)
             val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelUpdate)
 
-            // Сохраняем ссылку на прогресс-бар в поле класса MainActivity,
-            // чтобы обновлять его из statusReceiver
             progressBar = dialogView.findViewById<ProgressBar>(R.id.updateProgress)
 
             versionView.text = "Version: $version"
             changelogView.text = body
 
             builder.setView(dialogView)
-            builder.setCancelable(false) // Чтобы идиот не закрыл случайно
+            builder.setCancelable(false)
 
             updateDialog = builder.create()
             updateDialog?.show()
@@ -126,17 +131,165 @@ class MainActivity : AppCompatActivity() {
                 progressBar?.visibility = View.VISIBLE
 
                 logToConsole("Starting APK download...")
-                // Скачиваем во внутренний кэш приложения
                 val destination = File(cacheDir, "update.apk").absolutePath
                 startDownload(destination)
             }
         }
     }
 
+    // --- ЛЕГКОВЕСНЫЙ REGEX ПАРСЕР СЕРВЕРОВ (TOML) ---
+    private fun parseServers(toml: String): List<ServerModel> {
+        val servers = mutableListOf<ServerModel>()
+
+        // Разделяем TOML по блокам серверов
+        val parts = toml.split("[[servers]]")
+        if (parts.size <= 1) return emptyList()
+
+        for (i in 1 until parts.size) {
+            var sName: String? = null
+            var sAddr: String? = null
+            var sMode: String? = null
+
+            // Читаем блок построчно
+            for (line in parts[i].lines()) {
+                val trimmed = line.trim()
+
+                // Если строка начинается с [ (и это не массив [[servers) — значит, мы дошли
+                // до следующей секции (например, [keys]) и текущий блок серверов закончен.
+                if (trimmed.startsWith("[") && !trimmed.startsWith("[[servers")) {
+                    break
+                }
+
+                if (trimmed.startsWith("name")) {
+                    sName = trimmed.substringAfter("=").replace("\"", "").trim()
+                } else if (trimmed.startsWith("address")) {
+                    sAddr = trimmed.substringAfter("=").replace("\"", "").trim()
+                } else if (trimmed.startsWith("mode")) {
+                    sMode = trimmed.substringAfter("=").replace("\"", "").trim()
+                }
+            }
+
+            if (sAddr != null && sMode != null) {
+                servers.add(ServerModel(sName, sAddr, sMode))
+            }
+        }
+        return servers
+    }
+
+    // Заполнение Spinner-а доступными серверами
+    private fun setupServerSpinner() {
+        val content = selectedConfigContent ?: return
+        availableServers.clear()
+        availableServers.addAll(parseServers(content))
+
+        logToConsole("Найдено серверов в конфиге: ${availableServers.size}")
+
+        if (availableServers.isEmpty()) {
+            serverSelectSpinner.visibility = View.GONE
+            return
+        }
+
+        serverSelectSpinner.visibility = View.VISIBLE
+
+        // Используем наши новые оранжевые XML шаблоны
+        val adapter = ArrayAdapter(
+            this,
+            R.layout.spinner_dropdown_item, // <-- Заменили системный шаблон
+            availableServers.map { it.getFormattedName() }
+        )
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item) // <-- Заменили системный шаблон
+
+        serverSelectSpinner.adapter = adapter
+
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val lastSelected = prefs.getString("selected_server_${selectedConfigName}", "") ?: ""
+        val index = availableServers.indexOfFirst { it.getFormattedName() == lastSelected }
+        if (index >= 0) {
+            serverSelectSpinner.setSelection(index)
+            selectedServerName = lastSelected
+        } else {
+            selectedServerName = availableServers.first().getFormattedName()
+        }
+
+        serverSelectSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val name = availableServers[position].getFormattedName()
+                selectedServerName = name
+                prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
+                logToConsole("Выбрана нода: $name")
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    // --- БЕЗБОЛЕЗНЕННЫЙ QR СКАНЕР И DOWNLOADER ---
+    private fun startQrScanner() {
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .build()
+
+        val scanner = GmsBarcodeScanning.getClient(this, options)
+        scanner.startScan()
+            .addOnSuccessListener { barcode ->
+                val url = barcode.rawValue
+                if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    downloadConfigFromUrl(url)
+                } else {
+                    logToConsole("Неверный формат ссылки: $url")
+                }
+            }
+            .addOnFailureListener { e ->
+                logToConsole("QR Сканирование отменено или ошибка: ${e.message}")
+            }
+    }
+
+    private fun downloadConfigFromUrl(url: String) {
+        logToConsole("Загрузка конфигурации...")
+        spinner.visibility = View.VISIBLE
+
+        Thread {
+            try {
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.requestMethod = "GET"
+
+                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    val content = connection.inputStream.bufferedReader().use { it.readText() }
+
+                    // Простая проверка структуры
+                    if (content.contains("[main]") && content.contains("[keys]")) {
+                        runOnUiThread {
+                            selectedConfigContent = content
+                            selectedConfigName = "QR-Imported"
+                            saveConfigToPrefs(content, "QR-Imported")
+                            spinner.visibility = View.INVISIBLE
+                            logToConsole("Профиль импортирован по QR-коду!")
+                            setupServerSpinner()
+                        }
+                    } else {
+                        runOnUiThread {
+                            spinner.visibility = View.INVISIBLE
+                            logToConsole("Ошибка: файл по ссылке не является TOML-конфигом ANet")
+                        }
+                    }
+                } else {
+                    runOnUiThread {
+                        spinner.visibility = View.INVISIBLE
+                        logToConsole("Сервер вернул ошибку: ${connection.responseCode}")
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    spinner.visibility = View.INVISIBLE
+                    logToConsole("Ошибка скачивания: ${e.message}")
+                }
+            }
+        }.start()
+    }
 
     // --- LAUNCHERS ---
 
-    // Выбор файла
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -149,13 +302,13 @@ class MainActivity : AppCompatActivity() {
                 selectedConfigName = name
                 logToConsole("Loaded config: $name (${content.length} bytes)")
                 saveConfigToPrefs(content, name)
+                setupServerSpinner()
             } else {
                 logToConsole("Failed to read config file")
             }
         }
     }
 
-    // Права VPN
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -167,7 +320,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Права Уведомлений
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -179,7 +331,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun showErrorDialog(message: String) {
         runOnUiThread {
-            // Если диалог уже показан — ничего не делаем
             if (activeErrorDialog?.isShowing == true) {
                 return@runOnUiThread
             }
@@ -191,16 +342,15 @@ class MainActivity : AppCompatActivity() {
                 .replace("ERROR:", "")
                 .replace("WARN:", "")
                 .replace("[CORE AUTH]", "")
-                .replace(Regex("\\[AUTH\\].*failed:"), "") // Убираем инфу про попытку (attempt X)
+                .replace(Regex("\\[AUTH\\].*failed:"), "")
                 .trim()
 
             builder.setMessage(cleanMsg)
             builder.setPositiveButton("ПОНЯТНО") { dialog, _ ->
                 dialog.dismiss()
-                activeErrorDialog = null // Очищаем ссылку при закрытии
+                activeErrorDialog = null
             }
 
-            // Если юзер ткнул мимо окна — тоже очищаем
             builder.setOnCancelListener { activeErrorDialog = null }
 
             activeErrorDialog = builder.create()
@@ -229,47 +379,39 @@ class MainActivity : AppCompatActivity() {
             }
 
             status.let { msg ->
-                // 1. Ловим прогресс обновления (чтобы не спамить в логи, обрабатываем отдельно)
                 if (msg.startsWith("PROGRESS:")) {
                     val progressValue = msg.substringAfter("PROGRESS:").toFloatOrNull() ?: 0f
                     runOnUiThread {
                         progressBar?.isIndeterminate = false
                         progressBar?.progress = (progressValue * 100).toInt()
                     }
-                    return // Выходим из функции, прогресс в консоль логов не пишем
+                    return
                 }
 
-                // 2. Печатаем все остальные сообщения в консоль логов
                 logToConsole(msg)
 
-                // Проверяем на критические ошибки тарифа
                 val isAuthError = msg.contains("сессий", ignoreCase = true) ||
                         msg.contains("истекло", ignoreCase = true) ||
                         msg.contains("denied", ignoreCase = true)
 
                 when {
-                    // --- ОБНОВЛЕНИЯ ---
                     msg.contains("Найдено обновление", ignoreCase = true) -> {
-                        // Показываем модалку (текст можно распарсить из msg, если нужно)
                         val tag = getPendingTag()
                         val body = getPendingBody()
                         showUpdateModal(tag, body)
                     }
 
                     msg.contains("Update downloaded to cache", ignoreCase = true) -> {
-                        // Когда Rust сказал, что файл на диске
                         updateDialog?.dismiss()
                         installApk()
                     }
 
-                    // --- ОШИБКИ ТАРИФА ---
                     isAuthError -> {
                         stopVpnService()
                         setUiState(State.DISCONNECTED)
                         showErrorDialog(msg)
                     }
 
-                    // --- СОСТОЯНИЯ ПОДКЛЮЧЕНИЯ ---
                     msg.contains("Starting", ignoreCase = true) ||
                             msg.contains("Authenticating", ignoreCase = true) ||
                             msg.contains("Connecting", ignoreCase = true) -> {
@@ -296,13 +438,14 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Инициализация UI
         statusText = findViewById(R.id.statusText)
         connectionStatusLabel = findViewById(R.id.connectionStatus)
         connectButton = findViewById(R.id.connect)
         spinner = findViewById(R.id.connectSpinner)
         selectConfigButton = findViewById(R.id.selectConfig)
         scrollView = findViewById(R.id.scrollView)
+        btnScanQr = findViewById(R.id.btnScanQr)
+        serverSelectSpinner = findViewById(R.id.serverSelectSpinner)
 
         selectAppsButton = findViewById(R.id.selectApps)
         selectAppsButton.setOnClickListener {
@@ -311,23 +454,22 @@ class MainActivity : AppCompatActivity() {
 
         initLogger()
 
-        // Загрузка сохраненного конфига
         loadConfigFromPrefs()
         if (selectedConfigContent != null) {
             logToConsole("Config loaded: $selectedConfigName")
+            setupServerSpinner()
         } else {
             logToConsole("Welcome. Please select config file.")
         }
 
-        // Регистрация ресивера
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(statusReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            statusReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
-        // Обработчики кнопок
         connectButton.setOnClickListener {
             if (isVpnConnected) {
                 stopVpnService()
@@ -340,7 +482,10 @@ class MainActivity : AppCompatActivity() {
             filePickerLauncher.launch(arrayOf("*/*"))
         }
 
-        // Начальное состояние
+        btnScanQr.setOnClickListener {
+            startQrScanner()
+        }
+
         setUiState(State.DISCONNECTED)
 
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
@@ -358,7 +503,6 @@ class MainActivity : AppCompatActivity() {
 
             Thread {
                 try {
-                    // Передаем текущий контент конфига в Rust
                     checkUpdates(selectedConfigContent)
                 } catch (e: Exception) {
                     runOnUiThread {
@@ -374,7 +518,6 @@ class MainActivity : AppCompatActivity() {
 
     @Keep
     fun onStatusChanged(status: String) {
-        // Мы просто пересылаем это сообщение самим себе через ту же систему Broadcast
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
         intent.setPackage(packageName)
@@ -406,28 +549,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showAccessDeniedDialog(message: String) {
-        runOnUiThread {
-            // Чтобы диалог выглядел в стиле HL (черный/оранжевый),
-            // мы используем MaterialAlertDialogBuilder или кастомную тему
-            val builder = androidx.appcompat.app.AlertDialog.Builder(this)
-
-            // Настраиваем заголовок и текст (можешь добавить иконку радиации в ресурсы)
-            builder.setTitle("ОШИБКА ДОСТУПА")
-            builder.setMessage(message)
-
-            builder.setPositiveButton("ПОНЯТНО (OK)") { dialog, _ ->
-                dialog.dismiss()
-            }
-
-            val dialog = builder.create()
-            dialog.show()
-
-            // Стилизация кнопок программно (чтобы не ковырять XML)
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setTextColor(Color.parseColor("#FF6400"))
-        }
-    }
-
     private fun attemptVpnConnection() {
         val intent = VpnService.prepare(this)
         if (intent != null) {
@@ -444,6 +565,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
         intent.putExtra("CONFIG", selectedConfigContent)
+        intent.putExtra("SELECTED_SERVER", selectedServerName) // Передаем приоритетный сервер
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         val appsSet = prefs.getStringSet("allowed_apps", emptySet())
@@ -459,9 +581,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_STOP
         startService(intent)
-        // Состояние переключится в DISCONNECTED, когда придет подтверждение от Rust
-        // Но для отзывчивости можно сразу переключить UI в промежуточное состояние
-        setUiState(State.CONNECTING) // Показываем спиннер пока останавливается
+        setUiState(State.CONNECTING)
     }
 
     // --- UI HELPERS ---
@@ -474,33 +594,41 @@ class MainActivity : AppCompatActivity() {
                     spinner.visibility = View.INVISIBLE
 
                     connectButton.text = "CONNECT"
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF4CAF50.toInt()) // Green
+                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF4CAF50.toInt())
                     connectButton.isEnabled = true
 
                     connectionStatusLabel.text = "Now you are Disconnected to VPN"
-                    connectionStatusLabel.setTextColor(0xFFFF5252.toInt()) // Red
+                    connectionStatusLabel.setTextColor(0xFFFF5252.toInt())
+
+                    // Разрешаем выбор ноды при отключенном VPN
+                    serverSelectSpinner.isEnabled = true
                 }
                 State.CONNECTING -> {
-                    // isVpnConnected не меняем, ждем результата
                     spinner.visibility = View.VISIBLE
 
-                    connectButton.text = "" // Убираем текст, чтобы было видно спиннер (или можно оставить)
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF555555.toInt()) // Gray
+                    connectButton.text = ""
+                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF555555.toInt())
                     connectButton.isEnabled = false
 
                     connectionStatusLabel.text = "WORKING..."
-                    connectionStatusLabel.setTextColor(0xFFFFC107.toInt()) // Yellow
+                    connectionStatusLabel.setTextColor(0xFFFFC107.toInt())
+
+                    // Блокируем выбор ноды при подключении
+                    serverSelectSpinner.isEnabled = false
                 }
                 State.CONNECTED -> {
                     isVpnConnected = true
                     spinner.visibility = View.INVISIBLE
 
                     connectButton.text = "STOP"
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFFF44336.toInt()) // Red
+                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFFF44336.toInt())
                     connectButton.isEnabled = true
 
                     connectionStatusLabel.text = "Now you are connected to VPN"
-                    connectionStatusLabel.setTextColor(0xFF4CAF50.toInt()) // Green
+                    connectionStatusLabel.setTextColor(0xFF4CAF50.toInt())
+
+                    // Блокируем выбор ноды при активном соединении
+                    serverSelectSpinner.isEnabled = false
                 }
             }
         }

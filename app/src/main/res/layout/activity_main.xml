@@ -40,7 +40,7 @@
             android:fontFamily="monospace" />
     </LinearLayout>
 
-    <!-- Кнопка проверки обновлений (маленькая, рядом с шестеренкой) -->
+    <!-- Кнопка проверки обновлений -->
     <Button
         android:id="@+id/btnCheckUpdate"
         android:layout_width="48dp"
@@ -49,6 +49,17 @@
         app:icon="@android:drawable/stat_sys_download"
         app:iconTint="#888888"
         app:layout_constraintEnd_toStartOf="@+id/selectApps"
+        app:layout_constraintTop_toTopOf="@+id/selectConfig" />
+
+    <!-- Новая Кнопка: Сканирование QR-кода -->
+    <Button
+        android:id="@+id/btnScanQr"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@android:color/transparent"
+        app:icon="@android:drawable/ic_menu_camera"
+        app:iconTint="#FFFFFF"
+        app:layout_constraintEnd_toStartOf="@+id/btnCheckUpdate"
         app:layout_constraintTop_toTopOf="@+id/selectConfig" />
 
     <!-- Шапка -->
@@ -80,7 +91,7 @@
             android:letterSpacing="0.05" />
     </LinearLayout>
 
-    <!-- Настройки (Шестеренка) -->
+    <!-- Настройки -->
     <Button
         android:id="@+id/selectConfig"
         android:layout_width="56dp"
@@ -98,7 +109,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/header" />
 
-    <!-- Кнопка выбора приложений -->
+    <!-- Выбор приложений -->
     <Button
         android:id="@+id/selectApps"
         android:layout_width="56dp"
@@ -115,7 +126,7 @@
         app:layout_constraintTop_toTopOf="@+id/selectConfig"
         app:layout_constraintBottom_toBottomOf="@+id/selectConfig" />
 
-    <!-- Главная кнопка -->
+    <!-- Главный Спиннер подключения -->
     <ProgressBar
         android:id="@+id/connectSpinner"
         android:layout_width="220dp"
@@ -129,7 +140,6 @@
         app:layout_constraintStart_toStartOf="@+id/connect"
         app:layout_constraintTop_toTopOf="@+id/connect" />
 
-    <!-- Кнопка (200dp) -->
     <Button
         android:id="@+id/connect"
         android:layout_width="200dp"
@@ -158,7 +168,20 @@
         android:textSize="16sp"
         android:letterSpacing="0.1"
         android:textStyle="bold"
-        app:layout_constraintTop_toBottomOf="@+id/connectSpinner"
+        app:layout_constraintTop_toBottomOf="@+id/connect"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Новый Выпадающий список выбора ноды -->
+    <Spinner
+        android:id="@+id/serverSelectSpinner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:backgroundTint="#FFFFFF"
+        android:popupBackground="#1A1A1A"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@+id/connectionStatus"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
