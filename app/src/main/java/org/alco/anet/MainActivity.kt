@@ -34,6 +34,9 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import android.os.PowerManager
+import android.provider.Settings
+import android.net.Uri
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val name: String?, val address: String, val mode: String) {
@@ -318,6 +321,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun checkBatteryOptimizations() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                logToConsole("Запрос на отключение оптимизации батареи...")
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    logToConsole("Не удалось открыть настройки батареи: ${e.message}")
+                }
+            }
+        }
+    }
     // Права VPN
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -490,6 +509,7 @@ class MainActivity : AppCompatActivity() {
         if (selectedConfigContent != null) {
             logToConsole("Config loaded: $selectedConfigName")
             setupServerSpinner()
+            checkBatteryOptimizations()
         } else {
             logToConsole("Welcome. Please select config file.")
         }
