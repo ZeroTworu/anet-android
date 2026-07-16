@@ -14,6 +14,9 @@ import android.content.pm.ServiceInfo
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.os.Handler      // <-- Добавьте этот импорт
+import android.os.Looper       // <-- Добавьте этот импорт
 
 class ANetVpnService : VpnService() {
 
@@ -23,6 +26,9 @@ class ANetVpnService : VpnService() {
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // ТРЕБОВАНИЕ: Создаем Handler для перенаправления тяжелых вызовов на главный поток Android
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     companion object {
         init {
             System.loadLibrary("anet_mobile")
@@ -31,7 +37,7 @@ class ANetVpnService : VpnService() {
         const val ACTION_STOP = "org.alco.anet.STOP"
     }
 
-    // Native methods
+    // Native-методы
     private external fun initLogger()
     private external fun connectVpn(config: String, selectedServer: String)
     private external fun stopVpn()
@@ -73,7 +79,6 @@ class ANetVpnService : VpnService() {
 
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
 
-        // Начинаем слушать изменения сети при старте VPN
         registerNetworkCallback()
 
         Thread { connectVpn(config, selectedServer) }.start()
@@ -91,22 +96,34 @@ class ANetVpnService : VpnService() {
         }
     }
 
-    // Регистрация коллбека мониторинга сети
     private fun registerNetworkCallback() {
         if (networkCallback == null) {
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     super.onAvailable(network)
                     Log.i("ANet", "Active physical network switched to: $network")
-                    // Сообщаем системе использовать текущую активную сеть для вывода трафика VPN
-                    setUnderlyingNetworks(arrayOf(network))
+
+                    val capabilities = connectivityManager.getNetworkCapabilities(network)
+                    if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        Log.i("ANet", "Ignoring VPN network callback to prevent infinite routing loop")
+                        return
+                    }
+
+                    try {
+                        setUnderlyingNetworks(arrayOf(network))
+                    } catch (e: Exception) {
+                        Log.e("ANet", "Failed to set underlying networks: ${e.message}")
+                    }
                 }
 
                 override fun onLost(network: Network) {
                     super.onLost(network)
                     Log.i("ANet", "Physical network lost: $network")
-                    // Сбрасываем в null, заставляя ОС переключиться на резервный канал
-                    setUnderlyingNetworks(null)
+                    try {
+                        setUnderlyingNetworks(null)
+                    } catch (e: Exception) {
+                        Log.e("ANet", "Failed to clear underlying networks: ${e.message}")
+                    }
                 }
             }
             try {
@@ -128,6 +145,18 @@ class ANetVpnService : VpnService() {
         }
     }
 
+    private fun closeTun() {
+        if (vpnInterface != null) {
+            Log.i("ANet", "Closing TUN to prevent routing blackhole during reconnect...")
+            try {
+                vpnInterface!!.close()
+            } catch (e: Exception) {
+                Log.e("ANet", "Failed to close vpnInterface", e)
+            }
+            vpnInterface = null
+        }
+    }
+
     // --- Метод вызываемый из RUST ---
     fun configureTun(
         ip: String,
@@ -140,9 +169,7 @@ class ANetVpnService : VpnService() {
     ): Int {
         Log.i("ANet", "Configuring TUN...")
 
-        if (vpnInterface != null) {
-            try { vpnInterface!!.close() } catch (e: Exception) {}
-        }
+        closeTun()
 
         val builder = Builder()
         builder.addAddress(ip, prefix)
@@ -165,7 +192,6 @@ class ANetVpnService : VpnService() {
             } catch (e: Exception) { Log.e("ANet", "$e", e)}
         }
 
-        // DNS
         if (dnsServers.isNotEmpty()) {
             dnsServers.split(",").forEach {
                 if (it.isNotBlank()) try { builder.addDnsServer(it.trim()) } catch(e: Exception){
@@ -176,7 +202,6 @@ class ANetVpnService : VpnService() {
             builder.addDnsServer("1.1.1.1")
         }
 
-        // ROUTING LOGIC
         if (includeRoutes.isNotEmpty()) {
             Log.i("ANet", "Mode: INCLUDE (Split Tunneling)")
             includeRoutes.split(",").forEach { addRouteSafely(builder, it) }
@@ -246,6 +271,21 @@ class ANetVpnService : VpnService() {
         Log.d("ANet", "Status: $status")
         updateNotification(status)
 
+        val isDisconnect = status.contains("Connection lost", ignoreCase = true) ||
+                status.contains("Reconnecting", ignoreCase = true) ||
+                status.contains("Stopped", ignoreCase = true) ||
+                status.contains("Error", ignoreCase = true) ||
+                status.contains("Failed", ignoreCase = true)
+
+        if (isDisconnect) {
+            // ТРЕБОВАНИЕ: Асинхронно отправляем закрытие TUN на главный поток Android.
+            // Это мгновенно освобождает рабочий поток Rust (Tokio) от ожидания JNI,
+            // предотвращая дедлоки во время фазы очистки сессии.
+            mainHandler.post {
+                closeTun()
+            }
+        }
+
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
 
@@ -270,15 +310,13 @@ class ANetVpnService : VpnService() {
     }
 
     private fun stopVpnInternal() {
-        unregisterNetworkCallback() // Отключаем слушатель сети
-        try { vpnInterface?.close() } catch (e: Exception) {}
-        vpnInterface = null
+        unregisterNetworkCallback()
+        closeTun()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onRevoke() {
-        // Вызывается системой, если VPN-права отозваны или выданы другому приложению
         Log.i("ANet", "VPN Service Revoked by System")
         stopVpn()
         stopVpnInternal()

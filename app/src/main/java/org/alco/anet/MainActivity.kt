@@ -177,6 +177,20 @@ class MainActivity : AppCompatActivity() {
         return servers
     }
 
+    // Слушатель выбора элементов в выпадающем списке
+    private fun restoreSpinnerListener() {
+        serverSelectSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val name = availableServers[position].getFormattedName()
+                selectedServerName = name
+                val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
+                logToConsole("Приоритетный сервер: $name")
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
     // Инициализация выпадающего меню серверов с кастомной оранжевой разметкой
     private fun setupServerSpinner() {
         val content = selectedConfigContent ?: return
@@ -209,15 +223,8 @@ class MainActivity : AppCompatActivity() {
             selectedServerName = availableServers.first().getFormattedName()
         }
 
-        serverSelectSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val name = availableServers[position].getFormattedName()
-                selectedServerName = name
-                prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
-                logToConsole("Приоритетный сервер: $name")
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        // Подключаем слушатель событий выбора
+        restoreSpinnerListener()
     }
 
     // --- Google Barcode Scanner (ML Kit) ---
@@ -399,6 +406,27 @@ class MainActivity : AppCompatActivity() {
                         msg.contains("denied", ignoreCase = true)
 
                 when {
+                    // Синхронизируем Spinner при авто-переключении нод из Rust
+                    msg.contains("Active node:") -> {
+                        val activeName = msg.substringAfter("Active node:").trim()
+                        runOnUiThread {
+                            val index = availableServers.indexOfFirst { it.getFormattedName() == activeName }
+                            if (index >= 0) {
+                                // Принудительно отключаем слушатель событий на время программного сдвига
+                                serverSelectSpinner.onItemSelectedListener = null
+
+                                serverSelectSpinner.setSelection(index)
+                                selectedServerName = activeName
+
+                                val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+                                prefs.edit().putString("selected_server_${selectedConfigName}", activeName).apply()
+
+                                // Возвращаем слушатель назад
+                                restoreSpinnerListener()
+                            }
+                        }
+                    }
+
                     msg.contains("Найдено обновление", ignoreCase = true) -> {
                         val tag = getPendingTag()
                         val body = getPendingBody()
@@ -546,6 +574,10 @@ class MainActivity : AppCompatActivity() {
 
                 logToConsole("Конфигурация успешно импортирована: $name")
                 setupServerSpinner()
+
+                // ТРЕБОВАНИЕ: Мгновенный автоматический запуск туннеля при импорте из файла
+                logToConsole(">>> Автозапуск соединения...")
+                checkPermissionsAndStart()
             } else {
                 logToConsole("Ошибка импорта: Некорректный файл .toml")
             }
