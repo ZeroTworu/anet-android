@@ -7,7 +7,6 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import android.app.NotificationManager
-import android.os.Build
 import android.os.Build.*
 import java.net.InetAddress
 import android.content.pm.ServiceInfo
@@ -15,18 +14,24 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.os.Handler      // <-- Добавьте этот импорт
-import android.os.Looper       // <-- Добавьте этот импорт
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.atomic.AtomicInteger;
 
 class ANetVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private var allowedAppsCache: List<String> = emptyList()
+    @Volatile private var allowedAppsCache: List<String> = emptyList()
+
+    // Поколение TUN-интерфейса. Защищает от гонки: отложенный closeTun(),
+    // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
+    // интерфейс, который Rust успел поднять через configureTun().
+    private val tunGeneration = AtomicInteger(0)
 
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    // ТРЕБОВАНИЕ: Создаем Handler для перенаправления тяжелых вызовов на главный поток Android
+    // Создаем Handler для перенаправления тяжелых вызовов на главный поток Android
     private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
@@ -74,7 +79,15 @@ class ANetVpnService : VpnService() {
             startForeground(1337, notification)
         }
 
-        val config = intent?.getStringExtra("CONFIG") ?: return START_NOT_STICKY
+        val config = intent?.getStringExtra("CONFIG")
+        if (config == null) {
+            // START_STICKY: система может перезапустить сервис с intent == null
+            // (после убийства процесса). Конфига нет — молча висеть в форграунде
+            // с вечным "Connecting..." нельзя, корректно останавливаемся.
+            Log.w("ANet", "Restarted without intent/config, stopping service")
+            stopVpnInternal()
+            return START_NOT_STICKY
+        }
         val selectedServer = intent?.getStringExtra("SELECTED_SERVER") ?: ""
 
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
@@ -169,6 +182,7 @@ class ANetVpnService : VpnService() {
     ): Int {
         Log.i("ANet", "Configuring TUN...")
 
+        tunGeneration.incrementAndGet()
         closeTun()
 
         val builder = Builder()
@@ -278,11 +292,21 @@ class ANetVpnService : VpnService() {
                 status.contains("Failed", ignoreCase = true)
 
         if (isDisconnect) {
-            // ТРЕБОВАНИЕ: Асинхронно отправляем закрытие TUN на главный поток Android.
+            // Асинхронно отправляем закрытие TUN на главный поток Android.
             // Это мгновенно освобождает рабочий поток Rust (Tokio) от ожидания JNI,
             // предотвращая дедлоки во время фазы очистки сессии.
+            // ВАЖНО: снимаем "поколение" интерфейса СЕЙЧАС. Если к моменту
+            // исполнения post{} Rust уже поднял новый TUN (configureTun
+            // инкрементирует счетчик), закрывать его нельзя — иначе свежий
+            // интерфейс умирает сразу после реконнекта (blackhole до
+            // следующего реконнекта).
+            val gen = tunGeneration.get()
             mainHandler.post {
-                closeTun()
+                if (tunGeneration.get() == gen) {
+                    closeTun()
+                } else {
+                    Log.i("ANet", "Skip stale closeTun: TUN was re-established")
+                }
             }
         }
 
@@ -324,6 +348,10 @@ class ANetVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        // Останавливаем и Rust-часть: иначе tokio-рантайм продолжает жить
+        // в процессе после смерти сервиса — клиент бесконечно реконнектится
+        // в фоне (батарея), а колбэки летят в мертвый Service через GlobalRef.
+        Thread { stopVpn() }.start()
         stopVpnInternal()
         super.onDestroy()
     }
