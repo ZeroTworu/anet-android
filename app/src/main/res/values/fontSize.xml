@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+     <dimen name="button_font_size">8sp</dimen>
+     <dimen name="icon_padding">3sp</dimen>
+
+</resources>

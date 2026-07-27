@@ -3,6 +3,7 @@
     <style name="Theme.ANet" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowBackground">#121212</item>
         <item name="alertDialogTheme">@style/Theme.ANet.Dialog</item>
+        <item name="android:fontFamily">@font/tilda</item>
     </style>
 
     <!-- Тема для диалога в стиле Half-Life -->

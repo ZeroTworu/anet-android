@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Цвет, когда isEnabled = false (например, полупрозрачный белый) -->
+    <item android:state_enabled="false" android:color="#80FFFFFF" />
+    
+    <!-- Цвет по умолчанию (когда isEnabled = true) -->
+    <item android:color="#FFFFFF" />
+</selector>

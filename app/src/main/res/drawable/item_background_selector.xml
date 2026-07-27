@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Состояние при нажатии (сделаем цвет чуть темнее) -->
+    <item android:state_pressed="true" android:drawable="@color/buttons_icon_color" />
+    
+    <!-- Обычное состояние (ваш кастомный оранжевый цвет) -->
+    <item android:drawable="@color/buttons_icon_color" />
+</selector>

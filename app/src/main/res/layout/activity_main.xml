@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
@@ -13,65 +12,51 @@
     <LinearLayout
         android:id="@+id/buildInfoBlock"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="45dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="9dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/linear_radius"
         android:orientation="vertical"
         android:padding="8dp"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginBottom="8dp"
-        android:background="#1A1A1A"
-        app:layout_constraintBottom_toTopOf="@+id/scrollView">
+        app:layout_constraintBottom_toTopOf="@+id/scrollView"
+        app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer"
+        tools:layout_editor_absoluteX="16dp">
 
         <TextView
             android:id="@+id/versionLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:fontFamily="monospace"
             android:text="VERSION: v0.0.0 (32)"
-            android:textColor="#FF6400"
-            android:textSize="11sp"
-            android:fontFamily="monospace" />
+            android:textColor="@color/green"
+            android:textSize="11sp" />
 
         <TextView
             android:id="@+id/buildDetailLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:fontFamily="monospace"
             android:text="Type: CI/CD | Time: 1989-05-01..."
             android:textColor="#888888"
-            android:textSize="10sp"
-            android:fontFamily="monospace" />
+            android:textSize="10sp" />
     </LinearLayout>
 
     <!-- Кнопка проверки обновлений -->
-    <Button
-        android:id="@+id/btnCheckUpdate"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@android:color/transparent"
-        app:icon="@android:drawable/stat_sys_download"
-        app:iconTint="#888888"
-        app:layout_constraintEnd_toStartOf="@+id/selectApps"
-        app:layout_constraintTop_toTopOf="@+id/selectConfig" />
 
     <!-- Новая Кнопка: Сканирование QR-кода -->
-    <Button
-        android:id="@+id/btnScanQr"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@android:color/transparent"
-        app:icon="@android:drawable/ic_menu_camera"
-        app:iconTint="#FFFFFF"
-        app:layout_constraintEnd_toStartOf="@+id/btnCheckUpdate"
-        app:layout_constraintTop_toTopOf="@+id/selectConfig" />
 
     <!-- Шапка -->
     <LinearLayout
         android:id="@+id/header"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_horizontal|center_vertical"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="32dp"
-        app:layout_constraintStart_toStartOf="parent"
+        android:paddingTop="32dp"
+        android:paddingBottom="20dp"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
         <ImageView
@@ -79,62 +64,31 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_marginEnd="12dp"
-            android:src="@mipmap/ic_launcher" />
+            android:src="@drawable/anet_new_round" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:letterSpacing="0.05"
             android:text="ANet VPN"
-            android:textSize="28sp"
-            android:textStyle="bold"
             android:textColor="#FFFFFF"
-            android:letterSpacing="0.05" />
+            android:textSize="28sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Настройки -->
-    <Button
-        android:id="@+id/selectConfig"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="16dp"
-        android:background="@android:color/transparent"
-        app:icon="@drawable/ic_settings"
-        app:iconTint="#FFFFFF"
-        app:iconSize="32dp"
-        app:iconGravity="textStart"
-        android:padding="0dp"
-        android:insetTop="0dp"
-        android:insetBottom="0dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/header" />
 
     <!-- Выбор приложений -->
-    <Button
-        android:id="@+id/selectApps"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="@android:color/transparent"
-        app:icon="@android:drawable/ic_menu_manage"
-        app:iconTint="#FFFFFF"
-        app:iconSize="32dp"
-        app:iconGravity="textStart"
-        android:padding="0dp"
-        android:insetTop="0dp"
-        android:insetBottom="0dp"
-        app:layout_constraintEnd_toStartOf="@+id/selectConfig"
-        app:layout_constraintTop_toTopOf="@+id/selectConfig"
-        app:layout_constraintBottom_toBottomOf="@+id/selectConfig" />
 
     <!-- Главный Спиннер подключения -->
     <ProgressBar
         android:id="@+id/connectSpinner"
         android:layout_width="220dp"
         android:layout_height="220dp"
-        android:indeterminate="true"
-        android:indeterminateTint="#00FF00"
-        android:visibility="invisible"
         android:elevation="5dp"
+        android:indeterminate="true"
+        android:indeterminateTint="#FF9800"
+        android:visibility="invisible"
         app:layout_constraintBottom_toBottomOf="@+id/connect"
         app:layout_constraintEnd_toEndOf="@+id/connect"
         app:layout_constraintStart_toStartOf="@+id/connect"
@@ -144,17 +98,16 @@
         android:id="@+id/connect"
         android:layout_width="200dp"
         android:layout_height="200dp"
+        android:elevation="10dp"
         android:text="CONNECT"
+        android:textColor="#FFFFFF"
         android:textSize="24sp"
         android:textStyle="bold"
-        android:textColor="#FFFFFF"
-        android:backgroundTint="#4CAF50"
         app:cornerRadius="100dp"
-        android:elevation="10dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/header"
+        app:layout_constraintTop_toBottomOf="@+id/buttonLayout"
         app:layout_constraintVertical_bias="0.4" />
 
     <!-- Статус текстом -->
@@ -163,35 +116,33 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
+        android:letterSpacing="0.1"
         android:text="DISCONNECTED"
         android:textColor="#FF5252"
         android:textSize="16sp"
-        android:letterSpacing="0.1"
         android:textStyle="bold"
-        app:layout_constraintTop_toBottomOf="@+id/connect"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintTop_toBottomOf="@+id/connect" />
 
     <!-- Новый Выпадающий список выбора ноды -->
-    <Spinner
-        android:id="@+id/serverSelectSpinner"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:backgroundTint="#FFFFFF"
-        android:popupBackground="#1A1A1A"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@+id/connectionStatus"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
 
+
+    <LinearLayout
+        android:id="@+id/linearLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/connectionStatus" />
     <!-- Логи -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
         android:layout_height="100dp"
-        android:layout_marginBottom="24dp"
         android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="24dp"
         android:background="@null"
         android:scrollbars="none"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -202,15 +153,128 @@
             android:id="@+id/statusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:text="> System ready..."
-            android:textSize="12sp"
-            android:textColor="#00FF00"
             android:background="@null"
+            android:fontFamily="monospace"
             android:shadowColor="#000000"
             android:shadowDx="1"
             android:shadowDy="1"
-            android:shadowRadius="1" />
+            android:shadowRadius="1"
+            android:text="> System ready..."
+            android:textColor="@color/buttons_icon_color"
+            android:textSize="12sp" />
     </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/buttonLayout"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:gravity="center_horizontal|center_vertical"
+        android:orientation="horizontal"
+        app:layout_constrainedHeight="true"
+        app:layout_constrainedWidth="false"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/header">
+
+        <Button
+            android:id="@+id/btnCheckUpdate"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:text="update"
+            android:textColor="@color/buttons_icon_color"
+            android:textSize="@dimen/button_font_size"
+            app:icon="@drawable/update"
+            app:iconGravity="textTop"
+            app:iconPadding="@dimen/icon_padding"
+            app:iconTint="#fff" />
+
+        <Button
+            android:id="@+id/btnScanQr"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:text="QR"
+            android:textColor="@color/buttons_icon_color"
+            android:textSize="@dimen/button_font_size"
+            app:icon="@drawable/qr"
+            app:iconGravity="textTop"
+            app:iconPadding="@dimen/icon_padding"
+            app:iconTint="#FFFFFF" />
+
+        <Button
+            android:id="@+id/selectApps"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp"
+            android:text="Apps"
+            android:textColor="@color/buttons_icon_color"
+            android:textColorLink="#716B6B"
+            android:textSize="@dimen/button_font_size"
+            app:icon="@drawable/app"
+            app:iconGravity="textTop"
+            app:iconPadding="@dimen/icon_padding"
+            app:iconSize="32dp"
+            app:iconTint="#FFFFFF" />
+
+        <Button
+            android:id="@+id/selectConfig"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp"
+            android:text="Config"
+            android:textColor="@color/buttons_icon_color"
+            android:textSize="@dimen/button_font_size"
+            app:icon="@drawable/add"
+            app:iconGravity="textTop"
+            app:iconPadding="@dimen/icon_padding"
+            app:iconSize="32dp"
+            app:iconTint="#FFFFFF" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/serverSelectContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="26dp"
+        android:layout_marginRight="16dp"
+        android:layout_marginLeft="16dp"
+        android:background="@drawable/linear_radius"
+        android:clickable="true"
+        android:focusable="true"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/connectionStatus"> <!-- Для эффекта нажатия -->
+
+        <TextView
+            android:id="@+id/serverSelectTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:duplicateParentState="true"
+            android:textColor="@color/server_text_color_selector"
+            android:textSize="16sp"
+            tools:text="Server 1" />
+
+        />
+
+        <ImageView
+            android:id="@+id/serverSelectIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/chevron_down" /> <!-- Ваша иконка chevron -->
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

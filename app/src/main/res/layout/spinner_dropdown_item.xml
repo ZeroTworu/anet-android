@@ -3,10 +3,12 @@
     android:id="@android:id/text1"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:paddingVertical="14dp"
     android:paddingHorizontal="16dp"
-    android:textColor="#FF6400"
-    android:textSize="15sp"
-    android:textStyle="bold"
-    android:fontFamily="monospace"
-    android:background="#1E1E1E" />
+    android:paddingVertical="14dp"
+    android:textColor="#fff"
+    android:paddingBottom="13dp"
+    android:background="@drawable/item_with_divider_selector"
+    android:ellipsize="end"
+    android:singleLine="true"
+
+     />

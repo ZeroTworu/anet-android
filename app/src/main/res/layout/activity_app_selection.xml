@@ -19,15 +19,16 @@
             android:text="Choose Apps for VPN"
             android:textColor="#FFFFFF"
             android:textSize="20sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:font="@font/tilda"/>
 
         <Button
             android:id="@+id/btnSave"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="SAVE"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#4CAF50" />
+            android:textColor="@color/white"
+            android:backgroundTint="@color/orange" />
     </LinearLayout>
 
     <ProgressBar

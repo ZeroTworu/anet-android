@@ -7,36 +7,42 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.PorterDuff
+import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.View
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ListPopupWindow
 import android.widget.ProgressBar
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.ColorInt
+import androidx.annotation.DrawableRes
+import androidx.annotation.Keep
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import androidx.core.content.FileProvider
-import androidx.annotation.Keep
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import android.os.PowerManager
-import android.provider.Settings
-import android.net.Uri
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val name: String?, val address: String, val mode: String) {
@@ -57,7 +63,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectConfigButton: Button
     private lateinit var scrollView: ScrollView
     private lateinit var btnScanQr: Button
-    private lateinit var serverSelectSpinner: Spinner
+
+    private lateinit var serverSelectContainer: LinearLayout
+    private lateinit var serverSelectTextView: TextView
+    private lateinit var serverSelectIcon: ImageView
 
     private lateinit var selectAppsButton: Button
     private var activeErrorDialog: androidx.appcompat.app.AlertDialog? = null
@@ -180,22 +189,22 @@ class MainActivity : AppCompatActivity() {
         return servers
     }
 
-    // Слушатель выбора элементов в выпадающем списке
-    private fun restoreSpinnerListener() {
-        serverSelectSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val name = availableServers[position].getFormattedName()
-                selectedServerName = name
-                val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
-                prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
-                logToConsole("Приоритетный сервер: $name")
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+    // Обработка прямого/пользовательского выбора сервера
+    private fun onServerSelected(position: Int) {
+        if (position !in availableServers.indices) return
+        val name = availableServers[position].getFormattedName()
+
+        selectedServerName = name
+        serverSelectTextView.text = name
+
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
+
+        logToConsole("Приоритетный сервер: $name")
     }
 
-    // Инициализация выпадающего меню серверов с кастомной оранжевой разметкой
-    private fun setupServerSpinner() {
+    // Инициализация выпадающего меню выбора серверов
+    private fun setupServerSelector() {
         val content = selectedConfigContent ?: return
         availableServers.clear()
         availableServers.addAll(parseServers(content))
@@ -203,31 +212,77 @@ class MainActivity : AppCompatActivity() {
         logToConsole("Найдено серверов в конфиге: ${availableServers.size}")
 
         if (availableServers.isEmpty()) {
-            serverSelectSpinner.visibility = View.GONE
+            serverSelectContainer.visibility = View.GONE
             return
         }
 
-        serverSelectSpinner.visibility = View.VISIBLE
+        serverSelectContainer.visibility = View.VISIBLE
+
+        val formattedNames = availableServers.map { it.getFormattedName() }
+
+        // Восстановление последнего выбранного сервера
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val lastSelected = prefs.getString("selected_server_${selectedConfigName}", "") ?: ""
+        val index = formattedNames.indexOf(lastSelected)
+
+        if (index >= 0) {
+            selectedServerName = lastSelected
+        } else {
+            selectedServerName = formattedNames.first()
+        }
+
+        serverSelectTextView.text = selectedServerName
+
+        // Настройка ListPopupWindow
+        val listPopupWindow = ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
+        listPopupWindow.anchorView = serverSelectContainer
+
+        val backgroundDrawable = ContextCompat.getDrawable(this, R.drawable.popup_bg)
+        if (backgroundDrawable != null) {
+            listPopupWindow.setBackgroundDrawable(backgroundDrawable)
+        }
+
+        listPopupWindow.verticalOffset = 0
+
         val adapter = ArrayAdapter(
             this,
             R.layout.spinner_dropdown_item,
-            availableServers.map { it.getFormattedName() }
+            formattedNames
         )
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
-        serverSelectSpinner.adapter = adapter
+        listPopupWindow.setAdapter(adapter)
 
-        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
-        val lastSelected = prefs.getString("selected_server_${selectedConfigName}", "") ?: ""
-        val index = availableServers.indexOfFirst { it.getFormattedName() == lastSelected }
-        if (index >= 0) {
-            serverSelectSpinner.setSelection(index)
-            selectedServerName = lastSelected
-        } else {
-            selectedServerName = availableServers.first().getFormattedName()
+        // Обработка клика по элементу списка
+        listPopupWindow.setOnItemClickListener { _, _, position, _ ->
+            onServerSelected(position)
+            listPopupWindow.dismiss()
         }
 
-        // Подключаем слушатель событий выбора
-        restoreSpinnerListener()
+        // Переменная для отслеживания времени закрытия
+        var popupDismissTime = 0L
+
+        // Анимация и фиксация времени при закрытии
+        listPopupWindow.setOnDismissListener {
+            popupDismissTime = System.currentTimeMillis()
+            serverSelectIcon.animate().rotation(0f).setDuration(200).start()
+        }
+
+        // Обработка клика по контейнеру (Toggle: открыть / закрыть)
+        serverSelectContainer.setOnClickListener {
+            if (isVpnConnected) return@setOnClickListener
+
+            // Если с момента закрытия прошло меньше 250 мс, значит, закрытие произошло
+            // именно из-за этого клика по контейнеру — открывать заново не нужно.
+            if (System.currentTimeMillis() - popupDismissTime < 250) {
+                return@setOnClickListener
+            }
+
+            if (listPopupWindow.isShowing) {
+                listPopupWindow.dismiss()
+            } else {
+                serverSelectIcon.animate().rotation(180f).setDuration(200).start()
+                listPopupWindow.show()
+            }
+        }
     }
 
     // --- Google Barcode Scanner (ML Kit) ---
@@ -273,7 +328,7 @@ class MainActivity : AppCompatActivity() {
                             spinner.visibility = View.INVISIBLE
                             logToConsole("Профиль импортирован по QR-коду!")
 
-                            setupServerSpinner()
+                            setupServerSelector()
 
                             logToConsole(">>> Автозапуск соединения...")
                             checkPermissionsAndStart()
@@ -314,7 +369,7 @@ class MainActivity : AppCompatActivity() {
                 selectedConfigName = name
                 logToConsole("Loaded config: $name (${content.length} bytes)")
                 saveConfigToPrefs(content, name)
-                setupServerSpinner()
+                setupServerSelector()
             } else {
                 logToConsole("Failed to read config file")
             }
@@ -337,6 +392,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
     // Права VPN
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -425,23 +481,17 @@ class MainActivity : AppCompatActivity() {
                         msg.contains("denied", ignoreCase = true)
 
                 when {
-                    // Синхронизируем Spinner при авто-переключении нод из Rust
+                    // Синхронизируем элемент выбора при авто-переключении нод из Rust
                     msg.contains("Active node:") -> {
                         val activeName = msg.substringAfter("Active node:").trim()
                         runOnUiThread {
                             val index = availableServers.indexOfFirst { it.getFormattedName() == activeName }
                             if (index >= 0) {
-                                // Принудительно отключаем слушатель событий на время программного сдвига
-                                serverSelectSpinner.onItemSelectedListener = null
-
-                                serverSelectSpinner.setSelection(index)
+                                serverSelectTextView.text = activeName
                                 selectedServerName = activeName
 
                                 val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
                                 prefs.edit().putString("selected_server_${selectedConfigName}", activeName).apply()
-
-                                // Возвращаем слушатель назад
-                                restoreSpinnerListener()
                             }
                         }
                     }
@@ -496,9 +546,13 @@ class MainActivity : AppCompatActivity() {
         selectConfigButton = findViewById(R.id.selectConfig)
         scrollView = findViewById(R.id.scrollView)
         btnScanQr = findViewById(R.id.btnScanQr)
-        serverSelectSpinner = findViewById(R.id.serverSelectSpinner)
+
+        serverSelectContainer = findViewById(R.id.serverSelectContainer)
+        serverSelectTextView = findViewById(R.id.serverSelectTextView)
+        serverSelectIcon = findViewById(R.id.serverSelectIcon)
 
         selectAppsButton = findViewById(R.id.selectApps)
+
         selectAppsButton.setOnClickListener {
             startActivity(Intent(this, AppSelectionActivity::class.java))
         }
@@ -508,13 +562,12 @@ class MainActivity : AppCompatActivity() {
         loadConfigFromPrefs()
         if (selectedConfigContent != null) {
             logToConsole("Config loaded: $selectedConfigName")
-            setupServerSpinner()
+            setupServerSelector()
             checkBatteryOptimizations()
         } else {
             logToConsole("Welcome. Please select config file.")
         }
 
-        // Регистрация ресивера с помощью безопасного метода Jetpack ContextCompat
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
         ContextCompat.registerReceiver(
             this,
@@ -568,7 +621,6 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
-        // Проверяем, было ли запущено приложение через открытие .toml файла извне
         handleIntent(intent)
     }
 
@@ -593,9 +645,7 @@ class MainActivity : AppCompatActivity() {
                 saveConfigToPrefs(content, name)
 
                 logToConsole("Конфигурация успешно импортирована: $name")
-                setupServerSpinner()
-
-                // ТРЕБОВАНИЕ: Мгновенный автоматический запуск туннеля при импорте из файла
+                setupServerSelector()
                 logToConsole(">>> Автозапуск соединения...")
                 checkPermissionsAndStart()
             } else {
@@ -653,7 +703,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
         intent.putExtra("CONFIG", selectedConfigContent)
-        intent.putExtra("SELECTED_SERVER", selectedServerName) // Передаем приоритетную ноду
+        intent.putExtra("SELECTED_SERVER", selectedServerName)
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         val appsSet = prefs.getStringSet("allowed_apps", emptySet())
@@ -672,6 +722,59 @@ class MainActivity : AppCompatActivity() {
         setUiState(State.CONNECTING)
     }
 
+    fun TextView.setLeftIcon(iconRes: Int, text: String) {
+        val icon = ContextCompat.getDrawable(context, iconRes)
+        this.text = text
+        setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
+    }
+
+    fun TextView.setLeftIcon(
+        @DrawableRes iconRes: Int,
+        text: String,
+        offsetX: Int = 0,
+        offsetY: Int = 0,
+        @ColorInt color: Int? = null
+    ) {
+        this.text = text
+        val original = ContextCompat.getDrawable(context, iconRes) ?: return
+
+        if (color != null) {
+            original.mutate().setColorFilter(color, PorterDuff.Mode.SRC_IN)
+        }
+
+        val finalDrawable = if (offsetX == 0 && offsetY == 0) {
+            original.apply { setBounds(0, 0, intrinsicWidth, intrinsicHeight) }
+        } else {
+            object : Drawable() {
+                override fun draw(canvas: Canvas) {
+                    canvas.save()
+                    canvas.translate(offsetX.toFloat(), offsetY.toFloat())
+                    original.draw(canvas)
+                    canvas.restore()
+                }
+
+                override fun setBounds(left: Int, top: Int, right: Int, bottom: Int) {
+                    super.setBounds(left, top, right, bottom)
+                    original.setBounds(left, top, right, bottom)
+                }
+
+                override fun getIntrinsicWidth() = original.intrinsicWidth
+                override fun getIntrinsicHeight() = original.intrinsicHeight
+                override fun setAlpha(alpha: Int) { original.alpha = alpha }
+                override fun setColorFilter(filter: ColorFilter?) { original.colorFilter = filter }
+                override fun getOpacity() = original.opacity
+            }.apply {
+                setBounds(0, 0, original.intrinsicWidth, original.intrinsicHeight)
+            }
+        }
+
+        setCompoundDrawables(finalDrawable, null, null, null)
+    }
+
+    fun TextView.removeLeftIcon() {
+        setCompoundDrawables(null, null, null, null)
+    }
+
     // --- UI HELPERS ---
 
     private fun setUiState(state: State) {
@@ -682,38 +785,46 @@ class MainActivity : AppCompatActivity() {
                     spinner.visibility = View.INVISIBLE
 
                     connectButton.text = "CONNECT"
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF4CAF50.toInt())
+                    connectButton.setBackgroundTintList(null)
+                    connectButton.setBackgroundResource(R.drawable.button_gradient_connect)
                     connectButton.isEnabled = true
-
-                    connectionStatusLabel.text = "Now you are Disconnected to VPN"
+                    connectionStatusLabel.setLeftIcon(R.drawable.uncheck, "DISCONNECTED", offsetX = 0, offsetY = -5, color = (0xFFFF5252.toInt()))
                     connectionStatusLabel.setTextColor(0xFFFF5252.toInt())
 
-                    serverSelectSpinner.isEnabled = true
+                    // Разблокируем выбор серверов и возвращаем иконку стрелки
+                    serverSelectContainer.isEnabled = true
+                    serverSelectContainer.alpha = 1.0f
+                    serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
                 State.CONNECTING -> {
                     spinner.visibility = View.VISIBLE
 
                     connectButton.text = ""
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFF555555.toInt())
+                    connectButton.setBackgroundTintList(null)
+                    connectButton.setBackgroundResource(R.drawable.button_gradient_connecting)
                     connectButton.isEnabled = false
-
-                    connectionStatusLabel.text = "WORKING..."
+                    connectionStatusLabel.setLeftIcon(R.drawable.check, "WORKING...", offsetX = 0, offsetY = -5, color = Color.TRANSPARENT)
                     connectionStatusLabel.setTextColor(0xFFFFC107.toInt())
 
-                    serverSelectSpinner.isEnabled = false
+                    // Блокируем элемент выбора во время подключения
+                    serverSelectContainer.isEnabled = false
+                    serverSelectContainer.alpha = 0.6f
                 }
                 State.CONNECTED -> {
                     isVpnConnected = true
                     spinner.visibility = View.INVISIBLE
 
                     connectButton.text = "STOP"
-                    connectButton.backgroundTintList = ColorStateList.valueOf(0xFFF44336.toInt())
+                    connectButton.setBackgroundTintList(null)
+                    connectButton.setBackgroundResource(R.drawable.button_gradient_disconnect)
                     connectButton.isEnabled = true
-
-                    connectionStatusLabel.text = "Now you are connected to VPN"
+                    connectionStatusLabel.setLeftIcon(R.drawable.check, "CONNECTED", offsetX = 0, offsetY = -5, color = (0xFF4CAF50.toInt()))
                     connectionStatusLabel.setTextColor(0xFF4CAF50.toInt())
 
-                    serverSelectSpinner.isEnabled = false
+                    // Блокируем элемент выбора в активном состоянии и меняем иконку на замок
+                    serverSelectContainer.isEnabled = false
+                    serverSelectContainer.alpha = 0.6f
+                    serverSelectIcon.setImageResource(R.drawable.uncheck)
                 }
             }
         }

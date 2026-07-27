@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Состояние при нажатии (цвет подсветки + цвет линии снизу) -->
+    <item android:state_pressed="true">
+        <layer-list>
+            <!-- Цвет подсветки при клике -->
+            <item><color android:color="@color/grey_light_light" /></item>
+            <!-- Сама линия-разделитель (например, полупрозрачная белая) -->
+            <item android:bottom="1dp"><shape><solid android:color="#33FFFFFF" /></shape></item>
+        </layer-list>
+    </item>
+    
+    <!-- Обычное состояние -->
+    <item>
+        <layer-list>
+            <!-- Ваш основной оранжевый фон элемента -->
+            <item><color android:color="@color/grey_light" /></item>
+            <!-- Линия-разделитель снизу (например, чуть более темный оранжевый или черный оттенок) -->
+            <item android:bottom="1dp"><shape><solid android:color="@color/grey" /></shape></item>
+        </layer-list>
+    </item>
+</selector>
