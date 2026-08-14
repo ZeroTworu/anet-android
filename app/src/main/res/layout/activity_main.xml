@@ -268,8 +268,6 @@
             android:textSize="16sp"
             tools:text="Server 1" />
 
-        />
-
         <ImageView
             android:id="@+id/serverSelectIcon"
             android:layout_width="24dp"

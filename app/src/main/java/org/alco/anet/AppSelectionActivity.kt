@@ -23,6 +23,14 @@ data class AppInfo(
     var isSelected: Boolean
 )
 
+internal fun updateSelectedApps(
+    selectedApps: MutableSet<String>,
+    packageName: String,
+    isSelected: Boolean
+) {
+    if (isSelected) selectedApps.add(packageName) else selectedApps.remove(packageName)
+}
+
 class AppSelectionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
@@ -61,25 +69,26 @@ class AppSelectionActivity : AppCompatActivity() {
     private fun loadInstalledApps() {
         val pm = packageManager
 
-        // Запрашиваем список всех приложений ВМЕСТЕ с их запрошенными разрешениями (Permissions)
-        val flags = PackageManager.GET_PERMISSIONS
-        val packages = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(flags.toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.getInstalledPackages(flags)
-        }
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val packages = pm.queryIntentActivities(launcherIntent, 0)
+            .map { it.activityInfo.packageName }
+            .distinct()
 
-        for (packInfo in packages) {
-            val pkgName = packInfo.packageName
+        for (pkgName in packages) {
+            val packInfo = try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    pm.getPackageInfo(pkgName, PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(pkgName, PackageManager.GET_PERMISSIONS)
+                }
+            } catch (_: PackageManager.NameNotFoundException) {
+                continue
+            }
             val appInfo = packInfo.applicationInfo
 
             // Пропускаем мусор: системные сервисы без интерфейса или нас самих
             if (appInfo == null || pkgName == packageName) continue
-
-            // 1-Й ФИЛЬТР: Отсекаем служебные либы и фоновые демоны.
-            // Если Android не знает, как "открыть" это приложение кнопкой на экране — нам оно не нужно.
-            if (pm.getLaunchIntentForPackage(pkgName) == null) continue
 
             // 2-Й ФИЛЬТР: СЕГРЕГАЦИЯ БЕЗ СЕТИ
             // Смотрим массив permissions из манифеста приложения.
@@ -132,14 +141,13 @@ class AppSelectionActivity : AppCompatActivity() {
             holder.checkbox.setOnCheckedChangeListener(null)
             holder.checkbox.isChecked = app.isSelected
 
-            val toggleAction = {
-                app.isSelected = !app.isSelected
-                holder.checkbox.isChecked = app.isSelected
-                if (app.isSelected) selectedApps.add(app.packageName) else selectedApps.remove(app.packageName)
+            val updateSelection = { isSelected: Boolean ->
+                app.isSelected = isSelected
+                updateSelectedApps(selectedApps, app.packageName, isSelected)
             }
 
-            holder.checkbox.setOnCheckedChangeListener { _, _ -> toggleAction() }
-            holder.itemView.setOnClickListener { toggleAction() }
+            holder.checkbox.setOnCheckedChangeListener { _, isChecked -> updateSelection(isChecked) }
+            holder.itemView.setOnClickListener { holder.checkbox.isChecked = !holder.checkbox.isChecked }
         }
 
         override fun getItemCount() = appList.size

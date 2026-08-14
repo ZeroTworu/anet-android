@@ -45,12 +45,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
-data class ServerModel(val name: String?, val address: String, val mode: String) {
-    fun getFormattedName(): String {
-        if (!name.isNullOrBlank()) return name
-        val ip = address.split(":").firstOrNull() ?: address
-        return "$ip:${mode.uppercase()}"
-    }
+data class ServerModel(val name: String) {
+    fun getFormattedName() = name
 }
 
 class MainActivity : AppCompatActivity() {
@@ -63,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectConfigButton: Button
     private lateinit var scrollView: ScrollView
     private lateinit var btnScanQr: Button
+    private lateinit var btnCheckUpdate: Button
 
     private lateinit var serverSelectContainer: LinearLayout
     private lateinit var serverSelectTextView: TextView
@@ -76,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedConfigName: String = "Unknown"
     private var isCheckingUpdates = false
     private var isVpnConnected = false
+    private var currentUiState = State.DISCONNECTED
     private var updateDialog: androidx.appcompat.app.AlertDialog? = null
     private var progressBar: ProgressBar? = null
 
@@ -89,6 +87,10 @@ class MainActivity : AppCompatActivity() {
     private external fun startDownload(path: String)
     private external fun getPendingTag(): String
     private external fun getPendingBody(): String
+    private external fun inspectConfig(config: String): String
+    private external fun getVpnStateCode(): Int
+    private external fun getVpnServerName(): String
+    private external fun clearUiCallback()
 
     // Enum для состояний UI
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
@@ -154,39 +156,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- БЕЗОПАСНЫЙ TOML-ПАРСЕР СЕРВЕРОВ ---
-    private fun parseServers(toml: String): List<ServerModel> {
-        val servers = mutableListOf<ServerModel>()
-        val parts = toml.split("[[servers]]")
-        if (parts.size <= 1) return emptyList()
-
-        for (i in 1 until parts.size) {
-            var sName: String? = null
-            var sAddr: String? = null
-            var sMode: String? = null
-
-            // Читаем блок построчно, игнорируя брэкеты внутри строковых литералов
-            for (line in parts[i].lines()) {
-                val trimmed = line.trim()
-
-                if (trimmed.startsWith("[") && !trimmed.startsWith("[[servers")) {
-                    break
-                }
-
-                if (trimmed.startsWith("name")) {
-                    sName = trimmed.substringAfter("=").replace("\"", "").trim()
-                } else if (trimmed.startsWith("address")) {
-                    sAddr = trimmed.substringAfter("=").replace("\"", "").trim()
-                } else if (trimmed.startsWith("mode")) {
-                    sMode = trimmed.substringAfter("=").replace("\"", "").trim()
-                }
-            }
-
-            if (sAddr != null && sMode != null) {
-                servers.add(ServerModel(sName, sAddr, sMode))
-            }
+    private fun inspectServers(toml: String, reportError: Boolean = true): List<ServerModel>? {
+        val result = inspectConfig(toml).lineSequence().toList()
+        if (result.firstOrNull() != "OK") {
+            val error = result.drop(1).joinToString("\n").ifBlank { "Invalid configuration" }
+            logToConsole("Ошибка конфигурации: $error")
+            if (reportError) showErrorDialog(error)
+            return null
         }
-        return servers
+        return result.drop(1).filter { it.isNotBlank() }.map(::ServerModel)
     }
 
     // Обработка прямого/пользовательского выбора сервера
@@ -207,7 +185,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupServerSelector() {
         val content = selectedConfigContent ?: return
         availableServers.clear()
-        availableServers.addAll(parseServers(content))
+        val servers = inspectServers(content) ?: return
+        availableServers.addAll(servers)
 
         logToConsole("Найдено серверов в конфиге: ${availableServers.size}")
 
@@ -311,8 +290,9 @@ class MainActivity : AppCompatActivity() {
         spinner.visibility = View.VISIBLE
 
         Thread {
+            var connection: HttpURLConnection? = null
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
+                connection = URL(url).openConnection() as HttpURLConnection
                 connection.connectTimeout = 8000
                 connection.readTimeout = 8000
                 connection.requestMethod = "GET"
@@ -320,7 +300,7 @@ class MainActivity : AppCompatActivity() {
                 if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                     val content = connection.inputStream.bufferedReader().use { it.readText() }
 
-                    if (content.contains("[main]") && content.contains("[keys]")) {
+                    if (inspectServers(content, reportError = false) != null) {
                         runOnUiThread {
                             selectedConfigContent = content
                             selectedConfigName = "QR-Imported"
@@ -350,6 +330,8 @@ class MainActivity : AppCompatActivity() {
                     spinner.visibility = View.INVISIBLE
                     logToConsole("Ошибка скачивания: ${e.message}")
                 }
+            } finally {
+                connection?.disconnect()
             }
         }.start()
     }
@@ -364,7 +346,7 @@ class MainActivity : AppCompatActivity() {
             val content = readTextFromUri(it)
             val name = getFileName(it)
 
-            if (content.isNotEmpty()) {
+            if (content.isNotEmpty() && inspectServers(content) != null) {
                 selectedConfigContent = content
                 selectedConfigName = name
                 logToConsole("Loaded config: $name (${content.length} bytes)")
@@ -451,6 +433,18 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.hasExtra(ANetVpnService.EXTRA_VPN_STATE) == true) {
+                handleVpnState(
+                    intent.getIntExtra(
+                        ANetVpnService.EXTRA_VPN_STATE,
+                        ANetVpnService.STATE_DISCONNECTED
+                    ),
+                    intent.getStringExtra(ANetVpnService.EXTRA_VPN_MESSAGE).orEmpty(),
+                    intent.getStringExtra(ANetVpnService.EXTRA_SERVER_NAME).orEmpty()
+                )
+                return
+            }
+
             val status = intent?.getStringExtra("status")
 
             if (status == null) return
@@ -459,9 +453,8 @@ class MainActivity : AppCompatActivity() {
                 status.contains("актуальная версия") ||
                 status.contains("Ошибка обновления")) {
                 isCheckingUpdates = false
-                val btnUpdate = findViewById<Button>(R.id.btnCheckUpdate)
-                btnUpdate.isEnabled = true
-                btnUpdate.alpha = 1.0f
+                btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
+                btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.5f
             }
 
             status.let { msg ->
@@ -513,22 +506,39 @@ class MainActivity : AppCompatActivity() {
                         showErrorDialog(msg)
                     }
 
-                    msg.contains("Starting", ignoreCase = true) ||
-                            msg.contains("Authenticating", ignoreCase = true) ||
-                            msg.contains("Connecting", ignoreCase = true) -> {
-                        setUiState(State.CONNECTING)
-                    }
-
-                    msg.contains("VPN Tunnel UP", ignoreCase = true) -> {
-                        setUiState(State.CONNECTED)
-                    }
-
-                    msg.contains("Stopped", ignoreCase = true) ||
-                            msg.contains("Error", ignoreCase = true) ||
-                            msg.contains("Failed", ignoreCase = true) -> {
-                        setUiState(State.DISCONNECTED)
-                    }
                 }
+            }
+        }
+    }
+
+    private fun handleVpnState(state: Int, message: String, serverName: String) {
+        if (message.isNotBlank()) logToConsole(message)
+
+        if (serverName.isNotBlank()) {
+            val index = availableServers.indexOfFirst { it.getFormattedName() == serverName }
+            if (index >= 0) {
+                serverSelectTextView.text = serverName
+                selectedServerName = serverName
+                getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("selected_server_${selectedConfigName}", serverName)
+                    .apply()
+            }
+        }
+
+        when (state) {
+            ANetVpnService.STATE_CONNECTING,
+            ANetVpnService.STATE_RECONNECTING,
+            ANetVpnService.STATE_STOPPING -> setUiState(State.CONNECTING)
+
+            ANetVpnService.STATE_CONNECTED -> setUiState(State.CONNECTED)
+
+            ANetVpnService.STATE_DISCONNECTED,
+            ANetVpnService.STATE_STOPPED -> setUiState(State.DISCONNECTED)
+
+            ANetVpnService.STATE_FAILED -> {
+                setUiState(State.DISCONNECTED)
+                if (message.isNotBlank()) showErrorDialog(message)
             }
         }
     }
@@ -546,6 +556,7 @@ class MainActivity : AppCompatActivity() {
         selectConfigButton = findViewById(R.id.selectConfig)
         scrollView = findViewById(R.id.scrollView)
         btnScanQr = findViewById(R.id.btnScanQr)
+        btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
 
         serverSelectContainer = findViewById(R.id.serverSelectContainer)
         serverSelectTextView = findViewById(R.id.serverSelectTextView)
@@ -597,7 +608,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
-        val btnCheckUpdate = findViewById<Button>(R.id.btnCheckUpdate)
         btnCheckUpdate.setOnClickListener {
             if (isCheckingUpdates) return@setOnClickListener
 
@@ -613,8 +623,8 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     runOnUiThread {
                         isCheckingUpdates = false
-                        btnCheckUpdate.isEnabled = true
-                        btnCheckUpdate.alpha = 1.0f
+                        btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
+                        btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.5f
                         logToConsole("Update check error: ${e.message}")
                     }
                 }
@@ -639,7 +649,7 @@ class MainActivity : AppCompatActivity() {
             val content = readTextFromUri(data)
             val name = getFileName(data)
 
-            if (content.isNotEmpty() && content.contains("[main]") && content.contains("[keys]")) {
+            if (content.isNotEmpty() && inspectServers(content) != null) {
                 selectedConfigContent = content
                 selectedConfigName = name
                 saveConfigToPrefs(content, name)
@@ -663,8 +673,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         unregisterReceiver(statusReceiver)
+        clearUiCallback()
+        super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        handleVpnState(getVpnStateCode(), "", getVpnServerName())
     }
 
     // --- LOGIC ---
@@ -779,6 +795,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUiState(state: State) {
         runOnUiThread {
+            currentUiState = state
+            val controlsEnabled = state == State.DISCONNECTED
+            btnScanQr.isEnabled = controlsEnabled
+            btnScanQr.alpha = if (controlsEnabled) 1.0f else 0.5f
+            selectAppsButton.isEnabled = controlsEnabled
+            selectAppsButton.alpha = if (controlsEnabled) 1.0f else 0.5f
+            selectConfigButton.isEnabled = controlsEnabled
+            selectConfigButton.alpha = if (controlsEnabled) 1.0f else 0.5f
+            btnCheckUpdate.isEnabled = controlsEnabled && !isCheckingUpdates
+            btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.5f
+
             when (state) {
                 State.DISCONNECTED -> {
                     isVpnConnected = false

@@ -22,6 +22,7 @@ class ANetVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     @Volatile private var allowedAppsCache: List<String> = emptyList()
+    @Volatile private var isShuttingDown = false
 
     // Поколение TUN-интерфейса. Защищает от гонки: отложенный closeTun(),
     // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
@@ -40,12 +41,24 @@ class ANetVpnService : VpnService() {
         }
         const val ACTION_CONNECT = "org.alco.anet.CONNECT"
         const val ACTION_STOP = "org.alco.anet.STOP"
+        const val EXTRA_VPN_STATE = "vpn_state"
+        const val EXTRA_VPN_MESSAGE = "vpn_message"
+        const val EXTRA_SERVER_NAME = "server_name"
+
+        const val STATE_DISCONNECTED = 0
+        const val STATE_CONNECTING = 1
+        const val STATE_CONNECTED = 2
+        const val STATE_RECONNECTING = 3
+        const val STATE_STOPPING = 4
+        const val STATE_STOPPED = 5
+        const val STATE_FAILED = 6
     }
 
     // Native-методы
     private external fun initLogger()
     private external fun connectVpn(config: String, selectedServer: String)
     private external fun stopVpn()
+    private external fun clearVpnCallback()
 
     override fun onCreate() {
         super.onCreate()
@@ -58,10 +71,7 @@ class ANetVpnService : VpnService() {
 
         if (action == ACTION_STOP) {
             Log.i("ANet", "Received STOP Intent")
-            Thread {
-                stopVpn()
-                stopVpnInternal()
-            }.start()
+            requestStop()
             return START_NOT_STICKY
         }
 
@@ -158,6 +168,7 @@ class ANetVpnService : VpnService() {
         }
     }
 
+    @Synchronized
     private fun closeTun() {
         if (vpnInterface != null) {
             Log.i("ANet", "Closing TUN to prevent routing blackhole during reconnect...")
@@ -171,6 +182,7 @@ class ANetVpnService : VpnService() {
     }
 
     // --- Метод вызываемый из RUST ---
+    @Synchronized
     fun configureTun(
         ip: String,
         prefix: Int,
@@ -285,31 +297,6 @@ class ANetVpnService : VpnService() {
         Log.d("ANet", "Status: $status")
         updateNotification(status)
 
-        val isDisconnect = status.contains("Connection lost", ignoreCase = true) ||
-                status.contains("Reconnecting", ignoreCase = true) ||
-                status.contains("Stopped", ignoreCase = true) ||
-                status.contains("Error", ignoreCase = true) ||
-                status.contains("Failed", ignoreCase = true)
-
-        if (isDisconnect) {
-            // Асинхронно отправляем закрытие TUN на главный поток Android.
-            // Это мгновенно освобождает рабочий поток Rust (Tokio) от ожидания JNI,
-            // предотвращая дедлоки во время фазы очистки сессии.
-            // ВАЖНО: снимаем "поколение" интерфейса СЕЙЧАС. Если к моменту
-            // исполнения post{} Rust уже поднял новый TUN (configureTun
-            // инкрементирует счетчик), закрывать его нельзя — иначе свежий
-            // интерфейс умирает сразу после реконнекта (blackhole до
-            // следующего реконнекта).
-            val gen = tunGeneration.get()
-            mainHandler.post {
-                if (tunGeneration.get() == gen) {
-                    closeTun()
-                } else {
-                    Log.i("ANet", "Skip stale closeTun: TUN was re-established")
-                }
-            }
-        }
-
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
 
@@ -319,6 +306,38 @@ class ANetVpnService : VpnService() {
         }
 
         intent.setPackage(packageName)
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
+    fun onVpnStateChanged(state: Int, message: String, serverName: String) {
+        if (isShuttingDown) {
+            Log.d("ANet", "Ignoring queued VPN state during shutdown: $state")
+            return
+        }
+        Log.d("ANet", "VPN state=$state, message=$message, server=$serverName")
+        updateNotification(message)
+
+        if (state == STATE_RECONNECTING || state == STATE_STOPPING ||
+            state == STATE_STOPPED || state == STATE_FAILED) {
+            // Не даём отложенному закрытию уничтожить новый TUN, который Rust
+            // мог успеть создать во время реконнекта.
+            val generation = tunGeneration.get()
+            mainHandler.post {
+                if (tunGeneration.get() == generation) {
+                    closeTun()
+                } else {
+                    Log.i("ANet", "Skip stale closeTun: TUN was re-established")
+                }
+            }
+        }
+
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_VPN_STATE, state)
+            putExtra(EXTRA_VPN_MESSAGE, message)
+            putExtra(EXTRA_SERVER_NAME, serverName)
+            setPackage(packageName)
+        }
         sendBroadcast(intent)
     }
 
@@ -340,10 +359,27 @@ class ANetVpnService : VpnService() {
         stopSelf()
     }
 
+    private fun requestStop() {
+        if (isShuttingDown) return
+        isShuttingDown = true
+        Thread {
+            stopVpn()
+            mainHandler.post {
+                val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+                    putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                    putExtra(EXTRA_VPN_MESSAGE, "VPN stopped")
+                    putExtra(EXTRA_SERVER_NAME, "")
+                    setPackage(packageName)
+                }
+                sendBroadcast(intent)
+                stopVpnInternal()
+            }
+        }.start()
+    }
+
     override fun onRevoke() {
         Log.i("ANet", "VPN Service Revoked by System")
-        stopVpn()
-        stopVpnInternal()
+        requestStop()
         super.onRevoke()
     }
 
@@ -351,8 +387,13 @@ class ANetVpnService : VpnService() {
         // Останавливаем и Rust-часть: иначе tokio-рантайм продолжает жить
         // в процессе после смерти сервиса — клиент бесконечно реконнектится
         // в фоне (батарея), а колбэки летят в мертвый Service через GlobalRef.
-        Thread { stopVpn() }.start()
-        stopVpnInternal()
+        if (!isShuttingDown) {
+            isShuttingDown = true
+            Thread { stopVpn() }.start()
+        }
+        unregisterNetworkCallback()
+        closeTun()
+        clearVpnCallback()
         super.onDestroy()
     }
 }
