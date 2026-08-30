@@ -2,7 +2,6 @@ package org.alco.anet
 
 import android.content.Intent
 import android.net.VpnService
-import android.net.IpPrefix
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -84,7 +83,8 @@ class ANetVpnService : VpnService() {
             .build()
 
         if (VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34+
-            startForeground(1337, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            // Вызываем через хелпер для API 34
+            Api34Helper.startForegroundSpecial(this, 1337, notification)
         } else {
             startForeground(1337, notification)
         }
@@ -279,9 +279,8 @@ class ANetVpnService : VpnService() {
             try {
                 val parts = routeStr.trim().split("/")
                 if (parts.size == 2) {
-                    val ip = InetAddress.getByName(parts[0])
-                    val prefix = parts[1].toInt()
-                    builder.excludeRoute(IpPrefix(ip, prefix))
+                    // Вызываем через хелпер, чтобы избежать VerifyError
+                    Api33Helper.excludeRoute(builder, parts[0], parts[1].toInt())
                     Log.i("ANet", "Excluded: $routeStr")
                 }
             } catch (e: Exception) {
@@ -395,5 +394,30 @@ class ANetVpnService : VpnService() {
         closeTun()
         clearVpnCallback()
         super.onDestroy()
+    }
+}
+
+// Вспомогательный класс для изоляции API 33 (Android 13) от старых систем
+@androidx.annotation.RequiresApi(VERSION_CODES.TIRAMISU)
+object Api33Helper {
+    fun excludeRoute(builder: VpnService.Builder, ipStr: String, prefix: Int) {
+        val ip = java.net.InetAddress.getByName(ipStr)
+        builder.excludeRoute(android.net.IpPrefix(ip, prefix))
+    }
+}
+
+// Вспомогательный класс для изоляции API 34 (Android 14) от старых систем
+@androidx.annotation.RequiresApi(VERSION_CODES.UPSIDE_DOWN_CAKE)
+object Api34Helper {
+    fun startForegroundSpecial(
+        service: android.app.Service,
+        id: Int,
+        notification: android.app.Notification
+    ) {
+        service.startForeground(
+            id,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        )
     }
 }
