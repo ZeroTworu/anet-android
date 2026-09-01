@@ -43,6 +43,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import android.view.KeyEvent
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val name: String) {
@@ -543,6 +544,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun View.setupTvFocusAnimator() {
+        this.isFocusable = true// Гарантируем фокус в коде
+        this.isClickable = true
+
+        this.setOnFocusChangeListener { view, hasFocus ->
+            if (hasFocus) {
+                // Слегка увеличиваем элемент и делаем его ярче при наведении пульта
+                view.animate()
+                    .scaleX(1.08f)
+                    .scaleY(1.08f)
+                    .translationZ(8f) // Добавляет легкую тень на поддерживаемых API
+                    .setDuration(150)
+                    .start()
+            } else {
+                // Возвращаем в исходное состояние, когда фокус ушел
+                view.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .translationZ(0f)
+                    .setDuration(150)
+                    .start()
+            }
+        }
+    }
     // --- LIFECYCLE ---
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -608,6 +633,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
+        connectButton.setupTvFocusAnimator()
+        selectConfigButton.setupTvFocusAnimator()
+        btnScanQr.setupTvFocusAnimator()
+        btnCheckUpdate.setupTvFocusAnimator()
+        serverSelectContainer.setupTvFocusAnimator()
+        selectAppsButton.setupTvFocusAnimator()
+
         btnCheckUpdate.setOnClickListener {
             if (isCheckingUpdates) return@setOnClickListener
 
@@ -632,6 +664,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         handleIntent(intent)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+            val currentFocus = currentFocus
+            if (currentFocus != null) {
+                currentFocus.performClick() // Эмулируем клик на сфокусированном элементе
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onNewIntent(intent: Intent) {

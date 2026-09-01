@@ -42,10 +42,6 @@
             android:textSize="10sp" />
     </LinearLayout>
 
-    <!-- Кнопка проверки обновлений -->
-
-    <!-- Новая Кнопка: Сканирование QR-кода -->
-
     <!-- Шапка -->
     <LinearLayout
         android:id="@+id/header"
@@ -76,10 +72,6 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- Настройки -->
-
-    <!-- Выбор приложений -->
-
     <!-- Главный Спиннер подключения -->
     <ProgressBar
         android:id="@+id/connectSpinner"
@@ -94,10 +86,13 @@
         app:layout_constraintStart_toStartOf="@+id/connect"
         app:layout_constraintTop_toTopOf="@+id/connect" />
 
+    <!-- Главная кнопка CONNECT / STOP (Добавлен фокус для ТВ) -->
     <Button
         android:id="@+id/connect"
         android:layout_width="200dp"
         android:layout_height="200dp"
+        android:clickable="true"
+        android:focusable="true"
         android:elevation="10dp"
         android:text="CONNECT"
         android:textColor="#FFFFFF"
@@ -125,9 +120,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/connect" />
 
-    <!-- Новый Выпадающий список выбора ноды -->
-
-
     <LinearLayout
         android:id="@+id/linearLayout"
         android:layout_width="match_parent"
@@ -136,6 +128,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/connectionStatus" />
+
     <!-- Логи -->
     <ScrollView
         android:id="@+id/scrollView"
@@ -164,6 +157,7 @@
             android:textSize="12sp" />
     </ScrollView>
 
+    <!-- Панель кнопок (Добавлен фокус для ТВ на каждую кнопку) -->
     <LinearLayout
         android:id="@+id/buttonLayout"
         android:layout_width="match_parent"
@@ -181,6 +175,8 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
             android:background="@android:color/transparent"
             android:text="update"
             android:textColor="@color/buttons_icon_color"
@@ -195,6 +191,8 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
             android:background="@android:color/transparent"
             android:text="QR"
             android:textColor="@color/buttons_icon_color"
@@ -209,6 +207,8 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
             android:background="@android:color/transparent"
             android:insetTop="0dp"
             android:insetBottom="0dp"
@@ -228,6 +228,8 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
             android:background="@android:color/transparent"
             android:insetTop="0dp"
             android:insetBottom="0dp"
@@ -242,6 +244,7 @@
             app:iconTint="#FFFFFF" />
     </LinearLayout>
 
+    <!-- Выпадающий список выбора ноды (Уже настроен на фокус) -->
     <LinearLayout
         android:id="@+id/serverSelectContainer"
         android:layout_width="0dp"
@@ -256,7 +259,7 @@
         android:padding="12dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/connectionStatus"> <!-- Для эффекта нажатия -->
+        app:layout_constraintTop_toBottomOf="@+id/connectionStatus">
 
         <TextView
             android:id="@+id/serverSelectTextView"
@@ -272,7 +275,7 @@
             android:id="@+id/serverSelectIcon"
             android:layout_width="24dp"
             android:layout_height="24dp"
-            android:src="@drawable/chevron_down" /> <!-- Ваша иконка chevron -->
+            android:src="@drawable/chevron_down" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

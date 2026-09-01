@@ -182,6 +182,7 @@ class ANetVpnService : VpnService() {
     }
 
     // --- Метод вызываемый из RUST ---
+    @androidx.annotation.Keep
     @Synchronized
     fun configureTun(
         ip: String,
@@ -292,6 +293,7 @@ class ANetVpnService : VpnService() {
         }
     }
 
+    @androidx.annotation.Keep
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
         updateNotification(status)
