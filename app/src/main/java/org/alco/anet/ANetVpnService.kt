@@ -44,6 +44,13 @@ class ANetVpnService : VpnService() {
         const val EXTRA_VPN_MESSAGE = "vpn_message"
         const val EXTRA_SERVER_NAME = "server_name"
 
+        const val EXTRA_IS_STATS = "is_stats"
+        const val EXTRA_STATS_RX = "stats_rx"
+        const val EXTRA_STATS_TX = "stats_tx"
+        const val EXTRA_STATS_RTT = "stats_rtt"
+        const val EXTRA_STATS_RXM = "stats_rxm"
+        const val EXTRA_STATS_TXM = "stats_txm"
+
         const val STATE_DISCONNECTED = 0
         const val STATE_CONNECTING = 1
         const val STATE_CONNECTED = 2
@@ -337,6 +344,20 @@ class ANetVpnService : VpnService() {
             putExtra(EXTRA_VPN_STATE, state)
             putExtra(EXTRA_VPN_MESSAGE, message)
             putExtra(EXTRA_SERVER_NAME, serverName)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
+    fun onTrafficStats(rx: String, tx: String, rtt: String, rxm: String, txm: String) {
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_IS_STATS, true)
+            putExtra(EXTRA_STATS_RX, rx)
+            putExtra(EXTRA_STATS_TX, tx)
+            putExtra(EXTRA_STATS_RTT, rtt)
+            putExtra(EXTRA_STATS_RXM, rxm)
+            putExtra(EXTRA_STATS_TXM, txm)
             setPackage(packageName)
         }
         sendBroadcast(intent)

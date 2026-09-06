@@ -8,39 +8,7 @@
     android:background="#121212"
     tools:context=".MainActivity">
 
-    <!-- Блок информации о сборке -->
-    <LinearLayout
-        android:id="@+id/buildInfoBlock"
-        android:layout_width="match_parent"
-        android:layout_height="45dp"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="9dp"
-        android:layout_marginBottom="8dp"
-        android:background="@drawable/linear_radius"
-        android:orientation="vertical"
-        android:padding="8dp"
-        app:layout_constraintBottom_toTopOf="@+id/scrollView"
-        app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer"
-        tools:layout_editor_absoluteX="16dp">
 
-        <TextView
-            android:id="@+id/versionLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:text="VERSION: v0.0.0 (32)"
-            android:textColor="@color/green"
-            android:textSize="11sp" />
-
-        <TextView
-            android:id="@+id/buildDetailLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:text="Type: CI/CD | Time: 1989-05-01..."
-            android:textColor="#888888"
-            android:textSize="10sp" />
-    </LinearLayout>
 
     <!-- Шапка -->
     <LinearLayout
@@ -72,91 +40,6 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- Главный Спиннер подключения -->
-    <ProgressBar
-        android:id="@+id/connectSpinner"
-        android:layout_width="220dp"
-        android:layout_height="220dp"
-        android:elevation="5dp"
-        android:indeterminate="true"
-        android:indeterminateTint="#FF9800"
-        android:visibility="invisible"
-        app:layout_constraintBottom_toBottomOf="@+id/connect"
-        app:layout_constraintEnd_toEndOf="@+id/connect"
-        app:layout_constraintStart_toStartOf="@+id/connect"
-        app:layout_constraintTop_toTopOf="@+id/connect" />
-
-    <!-- Главная кнопка CONNECT / STOP (Добавлен фокус для ТВ) -->
-    <Button
-        android:id="@+id/connect"
-        android:layout_width="200dp"
-        android:layout_height="200dp"
-        android:clickable="true"
-        android:focusable="true"
-        android:elevation="10dp"
-        android:text="CONNECT"
-        android:textColor="#FFFFFF"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        app:cornerRadius="100dp"
-        app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/buttonLayout"
-        app:layout_constraintVertical_bias="0.4" />
-
-    <!-- Статус текстом -->
-    <TextView
-        android:id="@+id/connectionStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:letterSpacing="0.1"
-        android:text="DISCONNECTED"
-        android:textColor="#FF5252"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/connect" />
-
-    <LinearLayout
-        android:id="@+id/linearLayout"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/connectionStatus" />
-
-    <!-- Логи -->
-    <ScrollView
-        android:id="@+id/scrollView"
-        android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginBottom="24dp"
-        android:background="@null"
-        android:scrollbars="none"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@null"
-            android:fontFamily="monospace"
-            android:shadowColor="#000000"
-            android:shadowDx="1"
-            android:shadowDy="1"
-            android:shadowRadius="1"
-            android:text="> System ready..."
-            android:textColor="@color/buttons_icon_color"
-            android:textSize="12sp" />
-    </ScrollView>
-
     <!-- Панель кнопок (Добавлен фокус для ТВ на каждую кнопку) -->
     <LinearLayout
         android:id="@+id/buttonLayout"
@@ -175,9 +58,9 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:clickable="true"
             android:focusable="true"
-            android:background="@android:color/transparent"
             android:text="update"
             android:textColor="@color/buttons_icon_color"
             android:textSize="@dimen/button_font_size"
@@ -191,9 +74,9 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:clickable="true"
             android:focusable="true"
-            android:background="@android:color/transparent"
             android:text="QR"
             android:textColor="@color/buttons_icon_color"
             android:textSize="@dimen/button_font_size"
@@ -207,9 +90,9 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:clickable="true"
             android:focusable="true"
-            android:background="@android:color/transparent"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:padding="0dp"
@@ -217,7 +100,7 @@
             android:textColor="@color/buttons_icon_color"
             android:textColorLink="#716B6B"
             android:textSize="@dimen/button_font_size"
-            app:icon="@drawable/app"
+            app:icon="@drawable/apps_white"
             app:iconGravity="textTop"
             app:iconPadding="@dimen/icon_padding"
             app:iconSize="32dp"
@@ -228,9 +111,9 @@
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:clickable="true"
             android:focusable="true"
-            android:background="@android:color/transparent"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:padding="0dp"
@@ -244,14 +127,83 @@
             app:iconTint="#FFFFFF" />
     </LinearLayout>
 
+    <!-- Главный Спиннер подключения -->
+    <LinearLayout
+        android:id="@+id/buttonAndSpinnerLayout"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        app:layout_constraintBottom_toTopOf="@+id/serverSelectContainer"
+        app:layout_constraintTop_toBottomOf="@+id/buttonLayout">
+        <FrameLayout
+            android:id="@+id/frame"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:elevation="10dp"
+            android:layout_gravity="center">
+
+            <ImageView
+                android:id="@+id/connectSpinner"
+                android:layout_width="240dp"
+                android:layout_height="240dp"
+                android:elevation="12dp"
+                android:visibility="invisible"
+                app:layout_constraintBottom_toBottomOf="@+id/connect"
+                app:layout_constraintEnd_toEndOf="@+id/connect"
+                app:layout_constraintStart_toStartOf="@+id/connect"
+                app:layout_constraintTop_toTopOf="@+id/connect"
+                android:layout_gravity="center"/>
+
+            <!-- Главная кнопка CONNECT / DISCONNECT -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/connect"
+                android:layout_width="220dp"
+                android:layout_height="220dp"
+                android:clickable="true"
+                android:focusable="true"
+                app:backgroundTint="@null"
+                app:elevation="8dp"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.08"
+                android:text="CONNECT"
+                android:textAllCaps="true"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                app:cornerRadius="110dp"
+                app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/buttonLayout"
+                app:layout_constraintVertical_bias="0.4"
+                android:layout_gravity="center"/>
+        </FrameLayout>
+    <!-- Статус текстом -->
+    <TextView
+        android:id="@+id/connectionStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:letterSpacing="0.1"
+        android:text="DISCONNECTED"
+        android:textColor="#FF5252"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/connect" />
+    </LinearLayout>
+
+
     <!-- Выпадающий список выбора ноды (Уже настроен на фокус) -->
     <LinearLayout
         android:id="@+id/serverSelectContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="26dp"
-        android:layout_marginRight="16dp"
         android:layout_marginLeft="16dp"
+        android:layout_marginRight="16dp"
         android:background="@drawable/linear_radius"
         android:clickable="true"
         android:focusable="true"
@@ -259,7 +211,10 @@
         android:padding="12dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/connectionStatus">
+        app:layout_constraintTop_toBottomOf="@+id/buttonAndSpinnerLayout"
+        app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
+        android:layout_marginBottom="8dp"
+        >
 
         <TextView
             android:id="@+id/serverSelectTextView"
@@ -267,7 +222,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:duplicateParentState="true"
-            android:textColor="@color/server_text_color_selector"
+            android:textColor="@color/buttons_icon_color"
             android:textSize="16sp"
             tools:text="Server 1" />
 
@@ -278,4 +233,236 @@
             android:src="@drawable/chevron_down" />
     </LinearLayout>
 
+    <!-- Блок информации о сборке -->
+    <LinearLayout
+        android:id="@+id/buildInfoBlock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:background="@drawable/linear_radius"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        app:layout_constraintBottom_toTopOf="@+id/statsContainer"
+        app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer"
+        android:layout_marginBottom="8dp"
+        tools:layout_editor_absoluteX="16dp">
+
+        <!-- Блок с информацией о версии (слева) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/versionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="VERSION: v0.0.0 (32)"
+                android:textColor="@color/green"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/buildDetailLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Type: CI/CD | Time: 1989-05-01..."
+                android:textColor="#888888"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <!-- Компактная кнопка открытия логов (справа) -->
+        <Button
+            android:id="@+id/btnShowLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#333333"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="6dp"
+            android:text="LOG"
+            android:textColor="#fff"
+            android:textSize="11sp"
+            />
+
+    </LinearLayout>
+    <!--    Панель статистики-->
+    <LinearLayout
+        android:id="@+id/statsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:background="@drawable/linear_radius"
+        android:orientation="vertical"
+        android:paddingLeft="8dp"
+        android:paddingTop="4dp"
+        android:paddingRight="8dp"
+        android:paddingBottom="4dp"
+        app:layout_constraintTop_toBottomOf="@+id/buildInfoBlock"
+        app:layout_constraintBottom_toBottomOf="parent"
+        tools:layout_editor_absoluteX="16dp"
+        android:layout_marginBottom="16dp">
+
+        <!-- Верхний ряд: RTT, Download, Upload -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal"
+            android:weightSum="3">
+
+            <!-- RTT -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.05"
+                    android:text="RTT"
+                    android:textColor="@color/buttons_icon_color"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tvRtt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0ms"
+                    android:textColor="#A6A6A6"
+                    android:textSize="12sp"
+                     />
+            </LinearLayout>
+
+            <!-- Download (RX) -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.05"
+                    android:text="↓ DOWNLOAD"
+                    android:textColor="@color/buttons_icon_color"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tvRx"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 B/s"
+                    android:textColor="#A6A6A6"
+                    android:textSize="12sp"
+                     />
+            </LinearLayout>
+
+            <!-- Upload (TX) -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.05"
+                    android:text="↑ UPLOAD"
+                    android:textColor="@color/buttons_icon_color"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tvTx"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 B/s"
+                    android:textColor="#A6A6A6"
+                    android:textSize="12sp"
+                     />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Разделительная линия -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="0dp"
+            android:layout_marginBottom="0dp"
+            android:background="#383838" />
+
+        <!-- Нижний ряд: Total RX (rxm), Total TX (txm) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="4dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal"
+            android:weightSum="2">
+
+            <!-- Total RX -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.05"
+                    android:text="↓ TOTAL RX"
+                    android:textColor="@color/buttons_icon_color"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tvRxm"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 B"
+                    android:textColor="#A6A6A6"
+                    android:textSize="12sp"
+                     />
+            </LinearLayout>
+
+            <!-- Total TX -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.05"
+                    android:text="↑ TOTAL TX"
+                    android:textColor="@color/buttons_icon_color"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tvTxm"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 B"
+                    android:textColor="#A6A6A6"
+                    android:textSize="12sp"
+                     />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>
