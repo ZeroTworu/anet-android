@@ -16,9 +16,14 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -88,7 +93,7 @@ class MainActivity : AppCompatActivity() {
     private var activeErrorDialog: AlertDialog? = null
 
     // Буфер и управление окном логов
-    private val logBuffer = StringBuilder("> System ready...")
+    private val logBuffer = SpannableStringBuilder("> System ready...")
     private var activeLogTextView: TextView? = null
     private var activeLogScrollView: ScrollView? = null
 
@@ -104,6 +109,15 @@ class MainActivity : AppCompatActivity() {
     private var currentUiState = State.DISCONNECTED
     private var updateDialog: AlertDialog? = null
     private var progressBar: ProgressBar? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val connectTimeoutRunnable = Runnable {
+        if (currentUiState == State.CONNECTING) {
+            logToConsole("Connection timeout: stopping VPN attempt")
+            stopVpnService()
+            showErrorDialog("Connection timed out. Please check your network or try a different server.")
+        }
+    }
 
     // Список распарсенных нод из активного конфига
     private val availableServers = mutableListOf<ServerModel>()
@@ -542,11 +556,11 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
-                if (msg.contains("\"rx\":")) {
-                    onRustEvent(msg)
-                } else {
-                    logToConsole(msg)
+                if (msg.equals("VPN Stopped", ignoreCase = true)) {
+                    return
                 }
+
+                logToConsole(msg)
 
                 val isAuthError = msg.contains("сессий", ignoreCase = true) ||
                         msg.contains("истекло", ignoreCase = true) ||
@@ -589,7 +603,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVpnState(state: Int, message: String, serverName: String) {
-        if (message.isNotBlank()) logToConsole(message)
+        if (state == ANetVpnService.STATE_FAILED && message.isNotBlank()) {
+            logToConsole(message)
+        }
 
         if (serverName.isNotBlank()) {
             val index = availableServers.indexOfFirst { it.getFormattedName() == serverName }
@@ -604,9 +620,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         when (state) {
-            ANetVpnService.STATE_CONNECTING,
-            ANetVpnService.STATE_RECONNECTING,
-            ANetVpnService.STATE_STOPPING -> setUiState(State.CONNECTING)
+            ANetVpnService.STATE_CONNECTING -> setUiState(State.CONNECTING, "CONNECTING...")
+            ANetVpnService.STATE_RECONNECTING -> setUiState(State.CONNECTING, "RECONNECTING...")
+            ANetVpnService.STATE_STOPPING -> setUiState(State.CONNECTING, "STOPPING...")
 
             ANetVpnService.STATE_CONNECTED -> setUiState(State.CONNECTED)
 
@@ -697,10 +713,13 @@ class MainActivity : AppCompatActivity() {
         )
 
         connectButton.setOnClickListener {
-            if (isVpnConnected) {
-                stopVpnService()
-            } else {
-                checkPermissionsAndStart()
+            when (currentUiState) {
+                State.CONNECTED, State.CONNECTING -> {
+                    stopVpnService()
+                }
+                State.DISCONNECTED -> {
+                    checkPermissionsAndStart()
+                }
             }
         }
 
@@ -803,6 +822,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(connectTimeoutRunnable)
         unregisterReceiver(statusReceiver)
         clearUiCallback()
         super.onDestroy()
@@ -810,7 +830,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        handleVpnState(getVpnStateCode(), "", getVpnServerName())
+        val stateCode = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
+        handleVpnState(stateCode, "", getVpnServerName())
     }
 
     // --- LOGIC ---
@@ -844,7 +865,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun startVpnService() {
         setUiState(State.CONNECTING)
-        logToConsole(">>> Launching Service...")
 
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_CONNECT
@@ -861,11 +881,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopVpnService() {
-        logToConsole(">>> Stopping Service...")
+        mainHandler.removeCallbacks(connectTimeoutRunnable)
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_STOP
         startService(intent)
-        setUiState(State.CONNECTING)
+        setUiState(State.CONNECTING, "STOPPING...")
     }
 
     fun TextView.setLeftIcon(iconRes: Int, text: String) {
@@ -923,7 +943,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- UI HELPERS ---
 
-    private fun setUiState(state: State) {
+    private fun setUiState(state: State, customStatusText: String? = null) {
         runOnUiThread {
             currentUiState = state
             val controlsEnabled = state == State.DISCONNECTED
@@ -938,6 +958,7 @@ class MainActivity : AppCompatActivity() {
 
             when (state) {
                 State.DISCONNECTED -> {
+                    mainHandler.removeCallbacks(connectTimeoutRunnable)
                     isVpnConnected = false
                     spinner.visibility = View.INVISIBLE
                     spinner.clearAnimation()
@@ -969,6 +990,15 @@ class MainActivity : AppCompatActivity() {
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
                 State.CONNECTING -> {
+                    val statusText = customStatusText ?: "CONNECTING..."
+                    val isStopping = statusText.startsWith("STOPPING")
+                    if (!isStopping) {
+                        mainHandler.removeCallbacks(connectTimeoutRunnable)
+                        mainHandler.postDelayed(connectTimeoutRunnable, 30_000L)
+                    } else {
+                        mainHandler.removeCallbacks(connectTimeoutRunnable)
+                    }
+
                     spinner.visibility = View.VISIBLE
                     spinner.setImageDrawable(createAaaSpinnerDrawable())
 
@@ -980,8 +1010,13 @@ class MainActivity : AppCompatActivity() {
                         animator.start()
                     }
 
-                    connectButton.text = ""
-                    connectButton.isEnabled = false
+                    if (isStopping) {
+                        connectButton.text = "STOPPING"
+                        connectButton.isEnabled = false
+                    } else {
+                        connectButton.text = "CANCEL"
+                        connectButton.isEnabled = true
+                    }
 
                     val workingColors = intArrayOf(
                         Color.parseColor("#669D29"),
@@ -993,15 +1028,17 @@ class MainActivity : AppCompatActivity() {
                     )
                     connectButton.background = createNeonRingDrawable(workingColors)
 
-                    connectionStatusLabel.setLeftIcon(R.drawable.check, "WORKING...", offsetX = 0, offsetY = -5, color = Color.TRANSPARENT)
+                    connectionStatusLabel.setLeftIcon(R.drawable.check, statusText, offsetX = 0, offsetY = -5, color = Color.TRANSPARENT)
                     connectionStatusLabel.setTextColor(0xFFFFC107.toInt())
 
                     serverSelectContainer.isEnabled = false
                     serverSelectContainer.alpha = 0.6f
                 }
                 State.CONNECTED -> {
+                    mainHandler.removeCallbacks(connectTimeoutRunnable)
                     isVpnConnected = true
                     spinner.visibility = View.INVISIBLE
+                    spinner.clearAnimation()
 
                     connectButton.text = "STOP"
                     connectButton.isEnabled = true
@@ -1029,9 +1066,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun logToConsole(msg: String) {
         runOnUiThread {
-            logBuffer.append("\n> $msg")
+            val start = logBuffer.length
+            val prefix = if (start == 0) "> " else "\n> "
+            logBuffer.append(prefix).append(msg)
+            val lineStart = if (start == 0) 0 else start + 1
+            val lineEnd = logBuffer.length
 
-            activeLogTextView?.text = logBuffer.toString()
+            val color = when {
+                msg.contains("Config loaded", ignoreCase = true) ||
+                    msg.contains("dead session", ignoreCase = true) -> Color.parseColor("#FF9800")
+                msg.contains("Connected", ignoreCase = true) -> Color.parseColor("#4CAF50")
+                msg.contains("Stopped", ignoreCase = true) ||
+                    msg.contains("Error", ignoreCase = true) ||
+                    msg.contains("Ошибка", ignoreCase = true) -> Color.parseColor("#F44336")
+                else -> null
+            }
+
+            if (color != null) {
+                logBuffer.setSpan(
+                    ForegroundColorSpan(color),
+                    lineStart,
+                    lineEnd,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+
+            activeLogTextView?.text = SpannableStringBuilder(logBuffer)
             activeLogScrollView?.post {
                 activeLogScrollView?.fullScroll(View.FOCUS_DOWN)
             }
@@ -1564,7 +1624,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val textView = TextView(this).apply {
-            text = logBuffer.toString()
+            text = SpannableStringBuilder(logBuffer)
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
             setTextColor(ContextCompat.getColor(context, R.color.buttons_icon_color))
         }
@@ -1694,16 +1754,6 @@ class MainActivity : AppCompatActivity() {
             tvTx.text = txSpeed     // Скорость отдачи (напр. "1.86 Mbps" или "200 KiB/s")
             tvRxm.text = if (rxTotal.isNotBlank()) rxTotal else "0 B"   // Всего получено (напр. "2.20 MiB")
             tvTxm.text = if (txTotal.isNotBlank()) txTotal else "0 B"   // Всего отправлено (напр. "227.52 KiB")
-        }
-    }
-
-    fun onRustEvent(message: String) {
-        val regex = """"rx":\s*"([^"]+)",\s*"tx":\s*"([^"]+)",\s*"rtt":\s*"([^"]+)",\s*"rxm":\s*"([^"]+)",\s*"txm":\s*"([^"]+)"""".toRegex()
-        val match = regex.find(message)
-
-        if (match != null) {
-            val (rxTotal, txTotal, rtt, rxMbpsRaw, txMbpsRaw) = match.destructured
-            updateTrafficStats(rxTotal, txTotal, rtt, rxMbpsRaw, txMbpsRaw)
         }
     }
 

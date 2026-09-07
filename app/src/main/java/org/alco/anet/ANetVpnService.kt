@@ -15,6 +15,8 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.net.wifi.WifiManager
 import java.util.concurrent.atomic.AtomicInteger;
 
 class ANetVpnService : VpnService() {
@@ -22,6 +24,10 @@ class ANetVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     @Volatile private var allowedAppsCache: List<String> = emptyList()
     @Volatile private var isShuttingDown = false
+
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var lastNetwork: Network? = null
 
     // Поколение TUN-интерфейса. Защищает от гонки: отложенный closeTun(),
     // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
@@ -38,6 +44,14 @@ class ANetVpnService : VpnService() {
         init {
             System.loadLibrary("anet_mobile")
         }
+        @Volatile
+        var isServiceRunning: Boolean = false
+
+        @Volatile
+        private var lastConfigCache: String? = null
+        @Volatile
+        private var lastSelectedServerCache: String? = null
+
         const val ACTION_CONNECT = "org.alco.anet.CONNECT"
         const val ACTION_STOP = "org.alco.anet.STOP"
         const val EXTRA_VPN_STATE = "vpn_state"
@@ -63,11 +77,13 @@ class ANetVpnService : VpnService() {
     // Native-методы
     private external fun initLogger()
     private external fun connectVpn(config: String, selectedServer: String)
+    private external fun reconnectVpn()
     private external fun stopVpn()
     private external fun clearVpnCallback()
 
     override fun onCreate() {
         super.onCreate()
+        isServiceRunning = true
         initLogger()
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
@@ -96,16 +112,28 @@ class ANetVpnService : VpnService() {
             startForeground(1337, notification)
         }
 
-        val config = intent?.getStringExtra("CONFIG")
+        val config = intent?.getStringExtra("CONFIG") ?: lastConfigCache
         if (config == null) {
             // START_STICKY: система может перезапустить сервис с intent == null
-            // (после убийства процесса). Конфига нет — молча висеть в форграунде
-            // с вечным "Connecting..." нельзя, корректно останавливаемся.
-            Log.w("ANet", "Restarted without intent/config, stopping service")
+            // (после убийства процесса). Если и в кэше нет — корректно останавливаемся.
+            Log.w("ANet", "Restarted without intent/config and no cache, stopping service")
+            val stopIntent = Intent("org.alco.anet.VPN_STATUS").apply {
+                putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                putExtra(EXTRA_VPN_MESSAGE, "")
+                putExtra(EXTRA_SERVER_NAME, "")
+                setPackage(packageName)
+            }
+            sendBroadcast(stopIntent)
             stopVpnInternal()
             return START_NOT_STICKY
         }
-        val selectedServer = intent?.getStringExtra("SELECTED_SERVER") ?: ""
+        val selectedServer = intent?.getStringExtra("SELECTED_SERVER") ?: lastSelectedServerCache ?: ""
+
+        // Сохраняем в кэш для авто-восстановления при перезапуске сервиса системой
+        lastConfigCache = config
+        lastSelectedServerCache = selectedServer
+
+        acquireLocks()
 
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
 
@@ -114,6 +142,68 @@ class ANetVpnService : VpnService() {
         Thread { connectVpn(config, selectedServer) }.start()
 
         return START_STICKY
+    }
+
+    private fun acquireLocks() {
+        try {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ANet:VpnWakeLock").apply {
+                    setReferenceCounted(false)
+                    acquire(10 * 60 * 1000L) // Безопасный таймаут с продлением
+                }
+                Log.i("ANet", "WakeLock acquired")
+            }
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to acquire WakeLock: ${e.message}")
+        }
+
+        try {
+            if (wifiLock == null) {
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                wifiLock = wifiManager.createWifiLock(
+                    if (VERSION.SDK_INT >= VERSION_CODES.Q) {
+                        WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                    } else {
+                        WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                    },
+                    "ANet:VpnWifiLock"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                Log.i("ANet", "WifiLock acquired")
+            }
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to acquire WifiLock: ${e.message}")
+        }
+    }
+
+    private fun releaseLocks() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    Log.i("ANet", "WakeLock released")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to release WakeLock: ${e.message}")
+        }
+        wakeLock = null
+
+        try {
+            wifiLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    Log.i("ANet", "WifiLock released")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to release WifiLock: ${e.message}")
+        }
+        wifiLock = null
     }
 
     private fun createNotificationChannel() {
@@ -131,24 +221,39 @@ class ANetVpnService : VpnService() {
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     super.onAvailable(network)
-                    Log.i("ANet", "Active physical network switched to: $network")
-
                     val capabilities = connectivityManager.getNetworkCapabilities(network)
                     if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                         Log.i("ANet", "Ignoring VPN network callback to prevent infinite routing loop")
                         return
                     }
 
+                    val isNetworkSwitch = lastNetwork != null && lastNetwork != network
+                    lastNetwork = network
+                    Log.i("ANet", "Active physical network: $network (switch=$isNetworkSwitch)")
+
                     try {
                         setUnderlyingNetworks(arrayOf(network))
                     } catch (e: Exception) {
                         Log.e("ANet", "Failed to set underlying networks: ${e.message}")
+                    }
+
+                    if (isNetworkSwitch && !isShuttingDown) {
+                        Log.i("ANet", "Physical network switched! Triggering reconnect to bind to new network route...")
+                        onStatusChanged("Сеть изменилась, переподключение...")
+                        mainHandler.postDelayed({
+                            if (!isShuttingDown) {
+                                Thread { reconnectVpn() }.start()
+                            }
+                        }, 500)
                     }
                 }
 
                 override fun onLost(network: Network) {
                     super.onLost(network)
                     Log.i("ANet", "Physical network lost: $network")
+                    if (lastNetwork == network) {
+                        lastNetwork = null
+                    }
                     try {
                         setUnderlyingNetworks(null)
                     } catch (e: Exception) {
@@ -173,6 +278,7 @@ class ANetVpnService : VpnService() {
             }
             networkCallback = null
         }
+        lastNetwork = null
     }
 
     @Synchronized
@@ -370,11 +476,14 @@ class ANetVpnService : VpnService() {
             .setContentText(status)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
         try { nm?.notify(1337, n) } catch (e: SecurityException) {}
     }
 
     private fun stopVpnInternal() {
+        isServiceRunning = false
+        releaseLocks()
         unregisterNetworkCallback()
         closeTun()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -384,12 +493,13 @@ class ANetVpnService : VpnService() {
     private fun requestStop() {
         if (isShuttingDown) return
         isShuttingDown = true
+        releaseLocks()
         Thread {
             stopVpn()
             mainHandler.post {
                 val intent = Intent("org.alco.anet.VPN_STATUS").apply {
                     putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
-                    putExtra(EXTRA_VPN_MESSAGE, "VPN stopped")
+                    putExtra(EXTRA_VPN_MESSAGE, "")
                     putExtra(EXTRA_SERVER_NAME, "")
                     setPackage(packageName)
                 }
@@ -401,11 +511,28 @@ class ANetVpnService : VpnService() {
 
     override fun onRevoke() {
         Log.i("ANet", "VPN Service Revoked by System")
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+            putExtra(EXTRA_VPN_MESSAGE, "")
+            putExtra(EXTRA_SERVER_NAME, "")
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
         requestStop()
         super.onRevoke()
     }
 
     override fun onDestroy() {
+        isServiceRunning = false
+        releaseLocks()
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+            putExtra(EXTRA_VPN_MESSAGE, "")
+            putExtra(EXTRA_SERVER_NAME, "")
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+
         // Останавливаем и Rust-часть: иначе tokio-рантайм продолжает жить
         // в процессе после смерти сервиса — клиент бесконечно реконнектится
         // в фоне (батарея), а колбэки летят в мертвый Service через GlobalRef.
