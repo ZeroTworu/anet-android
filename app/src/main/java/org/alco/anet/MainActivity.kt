@@ -513,6 +513,25 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.getBooleanExtra("is_account_info", false) == true) {
+                val billing = intent.getStringExtra("billing") ?: "—"
+                val group = intent.getStringExtra("group") ?: "—"
+                val sessions = intent.getStringExtra("sessions") ?: "—"
+                val speed = intent.getStringExtra("speed") ?: "—"
+                val consumed = intent.getStringExtra("consumed") ?: "—"
+                val limit = intent.getStringExtra("limit") ?: "—"
+                val expires = intent.getStringExtra("expires") ?: "—"
+                
+                runOnUiThread {
+                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.VISIBLE
+                    findViewById<TextView>(R.id.tvAccountGroup)?.text = "$billing • $group"
+                    findViewById<TextView>(R.id.tvAccountExpires)?.text = expires
+                    findViewById<TextView>(R.id.tvAccountTraffic)?.text = "$consumed\n/ $limit"
+                    findViewById<TextView>(R.id.tvAccountSpeed)?.text = speed
+                    findViewById<TextView>(R.id.tvAccountSessions)?.text = sessions
+                }
+                return
+            }
             if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_STATS, false) == true) {
                 val rx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_RX).orEmpty()
                 val tx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_TX).orEmpty()
@@ -969,6 +988,8 @@ class MainActivity : AppCompatActivity() {
                     tvTx.text = "0 B/s"
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
+                    
+                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.GONE
 
                     connectButton.text = "CONNECT"
                     connectButton.isEnabled = true
