@@ -57,7 +57,7 @@ import java.net.URL
 import java.util.UUID
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
-data class ServerModel(val name: String) {
+data class ServerModel(val id: String, val name: String) {
     fun getFormattedName() = name
 }
 
@@ -263,20 +263,27 @@ class MainActivity : AppCompatActivity() {
             if (reportError) showErrorDialog(error)
             return null
         }
-        return result.drop(1).filter { it.isNotBlank() }.map(::ServerModel)
+        return result.drop(1).filter { it.isNotBlank() }.map { line ->
+            val parts = line.split("|", limit = 2)
+            if (parts.size == 2) {
+                ServerModel(parts[0], parts[1])
+            } else {
+                ServerModel(parts[0], parts[0])
+            }
+        }
     }
 
     private fun onServerSelected(position: Int) {
         if (position !in availableServers.indices) return
-        val name = availableServers[position].getFormattedName()
+        val server = availableServers[position]
 
-        selectedServerName = name
-        serverSelectTextView.text = name
+        selectedServerName = server.id
+        serverSelectTextView.text = server.name
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
+        prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
 
-        logToConsole("Приоритетный сервер: $name")
+        logToConsole("Выбран сервер/группа: ${server.name}")
     }
 
     private fun setupServerSelector() {
@@ -285,7 +292,7 @@ class MainActivity : AppCompatActivity() {
         val servers = inspectServers(content) ?: return
         availableServers.addAll(servers)
 
-        logToConsole("Найдено серверов в конфиге: ${availableServers.size}")
+        logToConsole("Найдено серверов/групп в конфиге: ${availableServers.size}")
 
         if (availableServers.isEmpty()) {
             serverSelectContainer.visibility = View.GONE
@@ -298,15 +305,16 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         val lastSelected = prefs.getString("selected_server_${selectedConfigName}", "") ?: ""
-        val index = formattedNames.indexOf(lastSelected)
+        val index = availableServers.indexOfFirst { it.id == lastSelected }
 
         if (index >= 0) {
-            selectedServerName = lastSelected
+            selectedServerName = availableServers[index].id
+            serverSelectTextView.text = availableServers[index].name
         } else {
-            selectedServerName = formattedNames.first()
+            selectedServerName = availableServers.first().id
+            serverSelectTextView.text = availableServers.first().name
+            prefs.edit().putString("selected_server_${selectedConfigName}", selectedServerName).apply()
         }
-
-        serverSelectTextView.text = selectedServerName
 
         val listPopupWindow = ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
         listPopupWindow.anchorView = serverSelectContainer
@@ -512,6 +520,25 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.getBooleanExtra("is_account_info", false) == true) {
+                val billing = intent.getStringExtra("billing") ?: "—"
+                val group = intent.getStringExtra("group") ?: "—"
+                val sessions = intent.getStringExtra("sessions") ?: "—"
+                val speed = intent.getStringExtra("speed") ?: "—"
+                val consumed = intent.getStringExtra("consumed") ?: "—"
+                val limit = intent.getStringExtra("limit") ?: "—"
+                val expires = intent.getStringExtra("expires") ?: "—"
+                
+                runOnUiThread {
+                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.VISIBLE
+                    findViewById<TextView>(R.id.tvAccountGroup)?.text = "$billing • $group"
+                    findViewById<TextView>(R.id.tvAccountExpires)?.text = expires
+                    findViewById<TextView>(R.id.tvAccountTraffic)?.text = "$consumed\n/ $limit"
+                    findViewById<TextView>(R.id.tvAccountSpeed)?.text = speed
+                    findViewById<TextView>(R.id.tvAccountSessions)?.text = sessions
+                }
+                return
+            }
             if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_STATS, false) == true) {
                 val rx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_RX).orEmpty()
                 val tx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_TX).orEmpty()
@@ -570,13 +597,14 @@ class MainActivity : AppCompatActivity() {
                     msg.contains("Active node:") -> {
                         val activeName = msg.substringAfter("Active node:").trim()
                         runOnUiThread {
-                            val index = availableServers.indexOfFirst { it.getFormattedName() == activeName }
+                            val index = availableServers.indexOfFirst { it.name == activeName }
                             if (index >= 0) {
-                                serverSelectTextView.text = activeName
-                                selectedServerName = activeName
+                                val server = availableServers[index]
+                                serverSelectTextView.text = server.name
+                                selectedServerName = server.id
 
                                 val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
-                                prefs.edit().putString("selected_server_${selectedConfigName}", activeName).apply()
+                                prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
                             }
                         }
                     }
@@ -608,13 +636,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (serverName.isNotBlank()) {
-            val index = availableServers.indexOfFirst { it.getFormattedName() == serverName }
+            val index = availableServers.indexOfFirst { it.name == serverName }
             if (index >= 0) {
-                serverSelectTextView.text = serverName
-                selectedServerName = serverName
+                val server = availableServers[index]
+                serverSelectTextView.text = server.name
+                selectedServerName = server.id
                 getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
                     .edit()
-                    .putString("selected_server_${selectedConfigName}", serverName)
+                    .putString("selected_server_${selectedConfigName}", server.id)
                     .apply()
             }
         }
@@ -968,6 +997,8 @@ class MainActivity : AppCompatActivity() {
                     tvTx.text = "0 B/s"
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
+                    
+                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.GONE
 
                     connectButton.text = "CONNECT"
                     connectButton.isEnabled = true

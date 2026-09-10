@@ -456,6 +456,30 @@ class ANetVpnService : VpnService() {
     }
 
     @androidx.annotation.Keep
+    fun onAccountInfo(
+        billing: String,
+        group: String,
+        sessions: String,
+        speed: String,
+        consumed: String,
+        limit: String,
+        expires: String
+    ) {
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra("is_account_info", true)
+            putExtra("billing", billing)
+            putExtra("group", group)
+            putExtra("sessions", sessions)
+            putExtra("speed", speed)
+            putExtra("consumed", consumed)
+            putExtra("limit", limit)
+            putExtra("expires", expires)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
     fun onTrafficStats(rx: String, tx: String, rtt: String, rxm: String, txm: String) {
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra(EXTRA_IS_STATS, true)
