@@ -276,7 +276,7 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         prefs.edit().putString("selected_server_${selectedConfigName}", name).apply()
 
-        logToConsole("Приоритетный сервер: $name")
+        logToConsole("Выбран сервер/группа: $name")
     }
 
     private fun setupServerSelector() {
@@ -285,7 +285,7 @@ class MainActivity : AppCompatActivity() {
         val servers = inspectServers(content) ?: return
         availableServers.addAll(servers)
 
-        logToConsole("Найдено серверов в конфиге: ${availableServers.size}")
+        logToConsole("Найдено серверов/групп в конфиге: ${availableServers.size}")
 
         if (availableServers.isEmpty()) {
             serverSelectContainer.visibility = View.GONE
@@ -304,6 +304,7 @@ class MainActivity : AppCompatActivity() {
             selectedServerName = lastSelected
         } else {
             selectedServerName = formattedNames.first()
+            prefs.edit().putString("selected_server_${selectedConfigName}", selectedServerName).apply()
         }
 
         serverSelectTextView.text = selectedServerName
