@@ -10,3 +10,4 @@
 local.properti
 *.so
 /jniLibs
+/app/keystore/*.jks
