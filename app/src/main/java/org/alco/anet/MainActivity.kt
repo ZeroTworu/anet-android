@@ -22,7 +22,7 @@ import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.text.Spannable
-import android.text.SpannableStringBuilder
+import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.View
@@ -33,6 +33,7 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListPopupWindow
+import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -52,9 +53,14 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+import android.widget.Toast
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val id: String, val name: String) {
@@ -92,10 +98,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var selectAppsButton: Button
     private var activeErrorDialog: AlertDialog? = null
 
-    // Буфер и управление окном логов
-    private val logBuffer = SpannableStringBuilder("> System ready...")
-    private var activeLogTextView: TextView? = null
-    private var activeLogScrollView: ScrollView? = null
+    // Буфер и управление окном логов.
+    // Каждая строка хранится отдельным элементом (а не одной гигантской SpannableStringBuilder),
+    // чтобы ListView мог переиспользовать (recycle) view-элементы и не перекладывать весь текст
+    // заново при каждой новой строке лога — именно это и вызывало тормоза при большом логе.
+    private val logLines = ArrayDeque<CharSequence>().apply { add("> System ready...") }
+    private var activeLogAdapter: ArrayAdapter<CharSequence>? = null
+    private var activeLogListView: ListView? = null
 
     // Управление окном списка конфигов
     private var activeConfigDialog: AlertDialog? = null
@@ -141,6 +150,10 @@ class MainActivity : AppCompatActivity() {
         init {
             System.loadLibrary("anet_mobile")
         }
+
+        // Защита от неограниченного роста памяти при очень долгой работе VPN.
+        // "Сохранить лог" при этом всё равно пишет то, что реально накоплено в буфере.
+        private const val MAX_LOG_LINES = 20000
     }
 
     private external fun initLogger()
@@ -313,10 +326,12 @@ class MainActivity : AppCompatActivity() {
         } else {
             selectedServerName = availableServers.first().id
             serverSelectTextView.text = availableServers.first().name
-            prefs.edit().putString("selected_server_${selectedConfigName}", selectedServerName).apply()
+            prefs.edit().putString("selected_server_${selectedConfigName}", selectedServerName)
+                .apply()
         }
 
-        val listPopupWindow = ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
+        val listPopupWindow =
+            ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
         listPopupWindow.anchorView = serverSelectContainer
 
         val backgroundDrawable = ContextCompat.getDrawable(this, R.drawable.popup_bg)
@@ -453,9 +468,10 @@ class MainActivity : AppCompatActivity() {
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
                 logToConsole("Запрос на отключение оптимизации батареи...")
                 try {
-                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
+                    val intent =
+                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
                     startActivity(intent)
                 } catch (e: Exception) {
                     logToConsole("Не удалось открыть настройки батареи: ${e.message}")
@@ -528,9 +544,8 @@ class MainActivity : AppCompatActivity() {
                 val consumed = intent.getStringExtra("consumed") ?: "—"
                 val limit = intent.getStringExtra("limit") ?: "—"
                 val expires = intent.getStringExtra("expires") ?: "—"
-                
+
                 runOnUiThread {
-                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.VISIBLE
                     findViewById<TextView>(R.id.tvAccountGroup)?.text = "$billing • $group"
                     findViewById<TextView>(R.id.tvAccountExpires)?.text = expires
                     findViewById<TextView>(R.id.tvAccountTraffic)?.text = "$consumed\n/ $limit"
@@ -567,7 +582,8 @@ class MainActivity : AppCompatActivity() {
 
             if (status.contains("Найдено обновление") ||
                 status.contains("актуальная версия") ||
-                status.contains("Ошибка обновления")) {
+                status.contains("Ошибка обновления")
+            ) {
                 isCheckingUpdates = false
                 btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
                 btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
@@ -604,7 +620,9 @@ class MainActivity : AppCompatActivity() {
                                 selectedServerName = server.id
 
                                 val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
-                                prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
+                                prefs.edit()
+                                    .putString("selected_server_${selectedConfigName}", server.id)
+                                    .apply()
                             }
                         }
                     }
@@ -746,6 +764,7 @@ class MainActivity : AppCompatActivity() {
                 State.CONNECTED, State.CONNECTING -> {
                     stopVpnService()
                 }
+
                 State.DISCONNECTED -> {
                     checkPermissionsAndStart()
                 }
@@ -859,7 +878,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        val stateCode = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
+        val stateCode =
+            if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
         handleVpnState(stateCode, "", getVpnServerName())
     }
 
@@ -873,7 +893,8 @@ class MainActivity : AppCompatActivity() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED
+            ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
                 attemptVpnConnection()
@@ -955,8 +976,14 @@ class MainActivity : AppCompatActivity() {
 
                 override fun getIntrinsicWidth() = original.intrinsicWidth
                 override fun getIntrinsicHeight() = original.intrinsicHeight
-                override fun setAlpha(alpha: Int) { original.alpha = alpha }
-                override fun setColorFilter(filter: ColorFilter?) { original.colorFilter = filter }
+                override fun setAlpha(alpha: Int) {
+                    original.alpha = alpha
+                }
+
+                override fun setColorFilter(filter: ColorFilter?) {
+                    original.colorFilter = filter
+                }
+
                 override fun getOpacity() = original.opacity
             }.apply {
                 setBounds(0, 0, original.intrinsicWidth, original.intrinsicHeight)
@@ -997,8 +1024,8 @@ class MainActivity : AppCompatActivity() {
                     tvTx.text = "0 B/s"
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
-                    
-                    findViewById<View>(R.id.accountInfoContainer)?.visibility = View.GONE
+
+
 
                     connectButton.text = "CONNECT"
                     connectButton.isEnabled = true
@@ -1013,13 +1040,20 @@ class MainActivity : AppCompatActivity() {
                     )
                     connectButton.background = createNeonRingDrawable(readyColors)
 
-                    connectionStatusLabel.setLeftIcon(R.drawable.block, "DISCONNECTED", offsetX = 0, offsetY = -5, color = (0xFFFF5252.toInt()))
-                    connectionStatusLabel.setTextColor(0xFFFF5252.toInt())
+                    connectionStatusLabel.setLeftIcon(
+                        R.drawable.block,
+                        "DISCONNECTED",
+                        offsetX = 0,
+                        offsetY = -2,
+                        color = (0xFFFF5252.toInt())
+                    )
+                    connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
                     serverSelectContainer.isEnabled = true
                     serverSelectContainer.alpha = 1.0f
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
+
                 State.CONNECTING -> {
                     val statusText = customStatusText ?: "CONNECTING..."
                     val isStopping = statusText.startsWith("STOPPING")
@@ -1034,7 +1068,12 @@ class MainActivity : AppCompatActivity() {
                     spinner.setImageDrawable(createAaaSpinnerDrawable())
 
                     if (spinner.animation == null) {
-                        val animator = android.animation.ObjectAnimator.ofFloat(spinner, View.ROTATION, 0f, 360f)
+                        val animator = android.animation.ObjectAnimator.ofFloat(
+                            spinner,
+                            View.ROTATION,
+                            0f,
+                            360f
+                        )
                         animator.duration = 1200
                         animator.repeatCount = android.animation.ValueAnimator.INFINITE
                         animator.interpolator = android.view.animation.LinearInterpolator()
@@ -1059,12 +1098,20 @@ class MainActivity : AppCompatActivity() {
                     )
                     connectButton.background = createNeonRingDrawable(workingColors)
 
-                    connectionStatusLabel.setLeftIcon(R.drawable.check, statusText, offsetX = 0, offsetY = -5, color = Color.TRANSPARENT)
-                    connectionStatusLabel.setTextColor(0xFFFFC107.toInt())
+                    connectionStatusLabel.setLeftIcon(
+                        R.drawable.check,
+                        statusText,
+                        offsetX = 0,
+                        offsetY = -5,
+                        color = Color.TRANSPARENT
+                    )
+                    connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
                     serverSelectContainer.isEnabled = false
-                    serverSelectContainer.alpha = 0.6f
+                    //serverSelectContainer.alpha = 1.0f
+                    serverSelectTextView.alpha = 0.3f
                 }
+
                 State.CONNECTED -> {
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
                     isVpnConnected = true
@@ -1084,11 +1131,18 @@ class MainActivity : AppCompatActivity() {
                     )
                     connectButton.background = createNeonRingDrawable(neonColors)
 
-                    connectionStatusLabel.setLeftIcon(R.drawable.check, "CONNECTED", offsetX = 0, offsetY = -5, color = (0xFF4CAF50.toInt()))
-                    connectionStatusLabel.setTextColor(0xFF4CAF50.toInt())
+                    connectionStatusLabel.setLeftIcon(
+                        R.drawable.dot,
+                        "CONNECTED",
+                        offsetX = -2,
+                        offsetY = 0,
+                        color = (0xFF4CAF50.toInt())
+                    )
+                    connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
                     serverSelectContainer.isEnabled = false
-                    serverSelectContainer.alpha = 0.6f
+                    //serverSelectContainer.alpha = 1.0f
+                    serverSelectTextView.alpha = 0.3f
                     serverSelectIcon.setImageResource(R.drawable.block)
                 }
             }
@@ -1097,34 +1151,51 @@ class MainActivity : AppCompatActivity() {
 
     private fun logToConsole(msg: String) {
         runOnUiThread {
-            val start = logBuffer.length
-            val prefix = if (start == 0) "> " else "\n> "
-            logBuffer.append(prefix).append(msg)
-            val lineStart = if (start == 0) 0 else start + 1
-            val lineEnd = logBuffer.length
-
             val color = when {
                 msg.contains("Config loaded", ignoreCase = true) ||
-                    msg.contains("dead session", ignoreCase = true) -> Color.parseColor("#FF9800")
+                        msg.contains(
+                            "dead session",
+                            ignoreCase = true
+                        ) -> Color.parseColor("#FF9800")
+
                 msg.contains("Connected", ignoreCase = true) -> Color.parseColor("#4CAF50")
                 msg.contains("Stopped", ignoreCase = true) ||
-                    msg.contains("Error", ignoreCase = true) ||
-                    msg.contains("Ошибка", ignoreCase = true) -> Color.parseColor("#F44336")
+                        msg.contains("Error", ignoreCase = true) ||
+                        msg.contains("Ошибка", ignoreCase = true) -> Color.parseColor("#F44336")
+
                 else -> null
             }
 
-            if (color != null) {
-                logBuffer.setSpan(
-                    ForegroundColorSpan(color),
-                    lineStart,
-                    lineEnd,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
+            val line = "> $msg"
+            val entry: CharSequence = if (color != null) {
+                SpannableString(line).apply {
+                    setSpan(
+                        ForegroundColorSpan(color),
+                        0,
+                        line.length,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+            } else {
+                line
             }
 
-            activeLogTextView?.text = SpannableStringBuilder(logBuffer)
-            activeLogScrollView?.post {
-                activeLogScrollView?.fullScroll(View.FOCUS_DOWN)
+            // Если пользователь сейчас смотрит конец лога (или окно логов ещё не открыто) —
+            // после добавления строки нужно проскроллить вниз. Если же он прокрутил историю
+            // вверх, чтобы что-то почитать — не дёргаем его скролл.
+            val listView = activeLogListView
+            val wasNearBottom = listView == null || listView.childCount == 0 ||
+                    listView.lastVisiblePosition >= logLines.size - 1
+
+            logLines.addLast(entry)
+            if (logLines.size > MAX_LOG_LINES) {
+                logLines.removeFirst()
+            }
+
+            activeLogAdapter?.notifyDataSetChanged()
+
+            if (wasNearBottom) {
+                listView?.post { listView.setSelection(logLines.size - 1) }
             }
         }
     }
@@ -1175,7 +1246,8 @@ class MainActivity : AppCompatActivity() {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            layoutParams =
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
         }
 
         headerLayout.addView(btnClose)
@@ -1279,7 +1351,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             for (item in configs) {
-                val isActive = item.id == activeId || (activeId == null && item.content == selectedConfigContent)
+                val isActive =
+                    item.id == activeId || (activeId == null && item.content == selectedConfigContent)
 
                 val itemLayout = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -1314,7 +1387,8 @@ class MainActivity : AppCompatActivity() {
                     text = item.name
                     setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
                     setTextColor(Color.WHITE)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                    layoutParams =
+                        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
                 }
 
                 // Выбор конфигурации по клику на карточку
@@ -1640,44 +1714,81 @@ class MainActivity : AppCompatActivity() {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            layoutParams =
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        val btnSave = Button(this).apply {
+            text = "Сохранить"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 10.dpToPx().toFloat()
+                setColor(Color.parseColor("#262626"))
+            }
+            setPadding(20.dpToPx(), 0, 20.dpToPx(), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                40.dpToPx()
+            ).apply {
+                setMargins(16.dpToPx(), 0, 0, 0)
+            }
+            setupTvFocusAnimator()
         }
 
         headerLayout.addView(btnClose)
         headerLayout.addView(titleView)
+        headerLayout.addView(btnSave)
 
-        val scrollView = ScrollView(this).apply {
+        // ListView вместо ScrollView+TextView: каждая строка лога — отдельный элемент,
+        // system переиспользует (recycle) view только для видимых строк, поэтому окно
+        // остаётся плавным независимо от того, сколько всего строк накопилось в логе.
+        val listView = ListView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1.0f
             )
+            divider = null
+            dividerHeight = 0
+            setSelector(android.R.color.transparent)
         }
 
-        val textView = TextView(this).apply {
-            text = SpannableStringBuilder(logBuffer)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
-            setTextColor(ContextCompat.getColor(context, R.color.buttons_icon_color))
+        val paddingV = 4.dpToPx()
+        val adapter = object : ArrayAdapter<CharSequence>(this, 0, logLines) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView as? TextView ?: TextView(context).apply {
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                    setTextColor(ContextCompat.getColor(context, R.color.buttons_icon_color))
+                    setPadding(0, paddingV, 0, paddingV)
+                }
+                view.text = getItem(position)
+                return view
+            }
         }
-
-        scrollView.addView(textView)
+        listView.adapter = adapter
 
         rootLayout.addView(headerLayout)
-        rootLayout.addView(scrollView)
+        rootLayout.addView(listView)
 
-        activeLogTextView = textView
-        activeLogScrollView = scrollView
-
+        activeLogAdapter = adapter
+        activeLogListView = listView
 
         val dialog = AlertDialog.Builder(this)
             .setOnDismissListener {
-                activeLogTextView = null
-                activeLogScrollView = null
+                activeLogAdapter = null
+                activeLogListView = null
             }
             .create()
 
         btnClose.setOnClickListener {
             dialog.dismiss()
+        }
+
+        btnSave.setOnClickListener {
+            showSaveLogDialog()
         }
 
         dialog.show()
@@ -1692,8 +1803,125 @@ class MainActivity : AppCompatActivity() {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
 
-        scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+        listView.post { listView.setSelection(logLines.size - 1) }
     }
+
+    // --- СОХРАНЕНИЕ ЛОГА В ФАЙЛ ---
+
+    private val saveLogLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        uri?.let { writeLogToUri(it) }
+    }
+
+    private fun launchSaveLog(extension: String) {
+        val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date())
+        try {
+            saveLogLauncher.launch("anet_log_$timestamp.$extension")
+        } catch (e: Exception) {
+            logToConsole("Не удалось открыть диалог сохранения: ${e.message}")
+        }
+    }
+
+    private fun writeLogToUri(uri: Uri) {
+        try {
+            contentResolver.openOutputStream(uri)?.use { outputStream ->
+                OutputStreamWriter(outputStream).use { writer ->
+                    for ((index, line) in logLines.withIndex()) {
+                        if (index > 0) writer.write("\n")
+                        writer.write(line.toString())
+                    }
+                }
+                Toast.makeText(this, "Лог сохранён: ${getFileName(uri)}", Toast.LENGTH_SHORT).show()
+                logToConsole("Лог сохранён: ${getFileName(uri)}")
+            } ?: logToConsole("Не удалось открыть файл для записи лога")
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка сохранения лога: ${e.message}", Toast.LENGTH_SHORT).show()
+            logToConsole("Ошибка сохранения лога: ${e.message}")
+        }
+    }
+
+
+    // --- СОХРАНЕНИЕ ЛОГА В ФАЙЛ custom---
+
+    private fun showSaveLogDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24.dpToPx(), 24.dpToPx(), 24.dpToPx(), 16.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16f * resources.displayMetrics.density
+                setColor(Color.parseColor("#1C1C1E"))
+            }
+        }
+
+        val titleTv = TextView(this).apply {
+            text = "В каком формате сохранить лог?"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 16.dpToPx())
+        }
+
+
+        val buttonBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 10.dpToPx(), 0, 0)
+            }
+        }
+
+        val btnCancel = Button(this).apply {
+            text = "Отмена"
+            setTextColor(Color.parseColor("#AAAAAA"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        val btnSaveTxt = Button(this).apply {
+            text = ".txt"
+            setTextColor(Color.parseColor("#00E676"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        val btnSaveLog = Button(this).apply {
+            text = ".log"
+            setTextColor(Color.parseColor("#00E676"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        buttonBar.addView(btnCancel)
+        buttonBar.addView(btnSaveTxt)
+        buttonBar.addView(btnSaveLog)
+
+        container.addView(titleTv)
+        container.addView(buttonBar)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(container)
+            .create()
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+
+        btnSaveTxt.setOnClickListener {
+            launchSaveLog("txt")
+            dialog.dismiss()
+        }
+
+        btnSaveLog.setOnClickListener {
+            launchSaveLog("log")
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+    }
+
 
     // --- FILE IO & PREFS ---
 
@@ -1775,7 +2003,13 @@ class MainActivity : AppCompatActivity() {
         return if (speedStr.isNotBlank()) speedStr else "0 B/s"
     }
 
-    fun updateTrafficStats(rxTotal: String, txTotal: String, rtt: String, rxSpeedRaw: String, txSpeedRaw: String) {
+    fun updateTrafficStats(
+        rxTotal: String,
+        txTotal: String,
+        rtt: String,
+        rxSpeedRaw: String,
+        txSpeedRaw: String
+    ) {
         val rxSpeed = formatSpeed(rxSpeedRaw)
         val txSpeed = formatSpeed(txSpeedRaw)
 
@@ -1783,8 +2017,10 @@ class MainActivity : AppCompatActivity() {
             tvRtt.text = if (rtt.isNotBlank()) rtt else "0 ms"
             tvRx.text = rxSpeed     // Скорость загрузки (напр. "18.47 Mbps" или "1.85 MiB/s")
             tvTx.text = txSpeed     // Скорость отдачи (напр. "1.86 Mbps" или "200 KiB/s")
-            tvRxm.text = if (rxTotal.isNotBlank()) rxTotal else "0 B"   // Всего получено (напр. "2.20 MiB")
-            tvTxm.text = if (txTotal.isNotBlank()) txTotal else "0 B"   // Всего отправлено (напр. "227.52 KiB")
+            tvRxm.text =
+                if (rxTotal.isNotBlank()) rxTotal else "0 B"   // Всего получено (напр. "2.20 MiB")
+            tvTxm.text =
+                if (txTotal.isNotBlank()) txTotal else "0 B"   // Всего отправлено (напр. "227.52 KiB")
         }
     }
 
@@ -1799,10 +2035,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val strokeDrawable = object : Drawable() {
-            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = strokeWidthPx
-            }
+            private val paint =
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = strokeWidthPx
+                }
 
             override fun draw(canvas: Canvas) {
                 val rect = android.graphics.RectF(
@@ -1821,12 +2058,14 @@ class MainActivity : AppCompatActivity() {
                 }
                 canvas.drawOval(rect, paint)
             }
+
             override fun setAlpha(alpha: Int) {}
             override fun setColorFilter(filter: ColorFilter?) {}
             override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
         }
 
-        val layerDrawable = android.graphics.drawable.LayerDrawable(arrayOf(solidBackground, strokeDrawable))
+        val layerDrawable =
+            android.graphics.drawable.LayerDrawable(arrayOf(solidBackground, strokeDrawable))
         val rippleColor = android.content.res.ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
 
         return android.graphics.drawable.RippleDrawable(rippleColor, layerDrawable, null)
@@ -1838,11 +2077,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun createAaaSpinnerDrawable(): Drawable {
         return object : Drawable() {
-            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = 4.dpToPx().toFloat()
-                strokeCap = android.graphics.Paint.Cap.ROUND
-            }
+            private val paint =
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = 4.dpToPx().toFloat()
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                }
 
             override fun draw(canvas: Canvas) {
                 val inset = paint.strokeWidth
@@ -1862,7 +2102,8 @@ class MainActivity : AppCompatActivity() {
                 )
                 val positions = floatArrayOf(0f, 0.6f, 1f)
 
-                val sweepGradient = android.graphics.SweepGradient(centerX, centerY, colors, positions)
+                val sweepGradient =
+                    android.graphics.SweepGradient(centerX, centerY, colors, positions)
 
                 val matrix = android.graphics.Matrix()
                 matrix.setRotate(-90f, centerX, centerY)

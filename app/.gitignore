@@ -1,1 +1,4 @@
 /build
+/jniLibs
+jniLibs/
+/jniLibs/
