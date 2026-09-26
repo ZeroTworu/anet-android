@@ -161,7 +161,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Бессрочно"
-                android:textColor="#4CAF50"
+                android:textColor="@color/green"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -331,7 +331,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:duplicateParentState="true"
-            android:textColor="@color/buttons_icon_color"
+            android:textColor="#EEBC7A"
             android:textSize="16sp"
             tools:text="Server 1" />
 
@@ -371,7 +371,8 @@
                 android:fontFamily="monospace"
                 android:text="VERSION: v0.0.0 (32)"
                 android:textColor="@color/green"
-                android:textSize="11sp" />
+                android:textSize="12sp"
+                android:textStyle="bold" /> />
 
             <TextView
                 android:id="@+id/buildDetailLabel"
@@ -438,7 +439,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.05"
                     android:text="RTT"
-                    android:textColor="@color/buttons_icon_color"
+                    android:textColor="#888888"
                     android:textSize="8sp" />
 
                 <TextView
@@ -446,8 +447,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0ms"
-                    android:textColor="#A6A6A6"
-                    android:textSize="12sp"
+                    android:textColor="#F2F3F6"
+                    android:textSize="11sp" />
                      />
             </LinearLayout>
 
@@ -464,7 +465,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.05"
                     android:text="↓ DOWNLOAD"
-                    android:textColor="@color/buttons_icon_color"
+                    android:textColor="#888888"
                     android:textSize="8sp" />
 
                 <TextView
@@ -472,8 +473,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B/s"
-                    android:textColor="#A6A6A6"
-                    android:textSize="12sp"
+                    android:textColor="#F2F3F6"
+                    android:textSize="11sp" />
                      />
             </LinearLayout>
 
@@ -490,7 +491,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.05"
                     android:text="↑ UPLOAD"
-                    android:textColor="@color/buttons_icon_color"
+                    android:textColor="#888888"
                     android:textSize="8sp" />
 
                 <TextView
@@ -498,8 +499,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B/s"
-                    android:textColor="#A6A6A6"
-                    android:textSize="12sp"
+                    android:textColor="#F2F3F6"
+                    android:textSize="11sp" />
                      />
             </LinearLayout>
         </LinearLayout>
@@ -534,7 +535,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.05"
                     android:text="↓ TOTAL RX"
-                    android:textColor="@color/buttons_icon_color"
+                    android:textColor="#888888"
                     android:textSize="8sp" />
 
                 <TextView
@@ -542,8 +543,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B"
-                    android:textColor="#A6A6A6"
-                    android:textSize="12sp"
+                    android:textColor="#F2F3F6"
+                    android:textSize="11sp" />
                      />
             </LinearLayout>
 
@@ -560,7 +561,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.05"
                     android:text="↑ TOTAL TX"
-                    android:textColor="@color/buttons_icon_color"
+                    android:textColor="#888888"
                     android:textSize="8sp" />
 
                 <TextView
@@ -568,8 +569,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 B"
-                    android:textColor="#A6A6A6"
-                    android:textSize="12sp"
+                    android:textColor="#F2F3F6"
+                    android:textSize="11sp" />
                      />
             </LinearLayout>
         </LinearLayout>

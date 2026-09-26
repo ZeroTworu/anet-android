@@ -61,6 +61,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import android.widget.Toast
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import android.util.Log
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val id: String, val name: String) {
@@ -154,6 +161,9 @@ class MainActivity : AppCompatActivity() {
         // Защита от неограниченного роста памяти при очень долгой работе VPN.
         // "Сохранить лог" при этом всё равно пишет то, что реально накоплено в буфере.
         private const val MAX_LOG_LINES = 20000
+        private const val PREF_SUBSCRIPTION_URL = "subscription_url"
+
+
     }
 
     private external fun initLogger()
@@ -532,6 +542,154 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    // Проверка ключа
+
+    private fun showEnterUrlDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24.dpToPx(), 24.dpToPx(), 24.dpToPx(), 16.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16f * resources.displayMetrics.density
+                setColor(Color.parseColor("#1C1C1E"))
+            }
+        }
+
+        val titleTv = TextView(this).apply {
+            text = "Введите ссылку"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 16.dpToPx())
+        }
+
+        val input = EditText(this).apply {
+            hint = "https://example.com/config.toml"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#7E7E7E"))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+            setPadding(16.dpToPx(), 12.dpToPx(), 16.dpToPx(), 12.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * resources.displayMetrics.density
+                setColor(Color.parseColor("#2C2C2E"))
+            }
+        }
+
+        val errorTv = TextView(this).apply {
+            setTextColor(Color.parseColor("#FF5252"))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            visibility = View.GONE
+            setPadding(4.dpToPx(), 6.dpToPx(), 4.dpToPx(), 0)
+        }
+
+        val loadingBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 8.dpToPx(), 0, 0)
+            }
+        }
+
+        val buttonBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 14.dpToPx(), 0, 0)
+            }
+        }
+
+        val btnCancel = Button(this).apply {
+            text = "Отмена"
+            setTextColor(Color.parseColor("#AAAAAA"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        val btnCustomConfig = Button(this).apply {
+            text = "Свой конфиг"
+            setTextColor(Color.parseColor("#EEBC7A"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        val btnOk = Button(this).apply {
+            text = "ОК"
+            setTextColor(Color.parseColor("#00E676"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        buttonBar.addView(btnCancel)
+        buttonBar.addView(btnCustomConfig)
+        buttonBar.addView(btnOk)
+
+        container.addView(titleTv)
+        container.addView(input)
+        container.addView(errorTv)
+        container.addView(loadingBar)
+        container.addView(buttonBar)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(container)
+            .setCancelable(false)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+            finishAffinity()
+        }
+
+        btnCustomConfig.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnOk.setOnClickListener {
+            val url = input.text.toString().trim()
+            if (url.isEmpty()) {
+                errorTv.text = "Поле ссылки не может быть пустым"
+                errorTv.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+
+            if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+                errorTv.text = "Ссылка должна начинаться с http:// или https://"
+                errorTv.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+
+            // Блокируем кнопки и показываем индикатор загрузки
+            btnOk.isEnabled = false
+            btnCancel.isEnabled = false
+            btnCustomConfig.isEnabled = false
+            errorTv.visibility = View.GONE
+            loadingBar.visibility = View.VISIBLE
+
+            downloadAndApplyConfigFromUrl(
+                initialUrl = url,
+                onSuccess = {
+                    dialog.dismiss()
+                },
+                onError = { error ->
+                    btnOk.isEnabled = true
+                    btnCancel.isEnabled = true
+                    btnCustomConfig.isEnabled = true
+                    loadingBar.visibility = View.GONE
+                    errorTv.text = error
+                    errorTv.visibility = View.VISIBLE
+                }
+            )
+        }
+
+        dialog.show()
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+    }
+
     // --- BROADCAST RECEIVER ---
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -743,6 +901,9 @@ class MainActivity : AppCompatActivity() {
         initLogger()
 
         loadConfigFromPrefs()
+
+        checkInitialUrl()
+
         if (selectedConfigContent != null) {
             logToConsole("Config loaded: $selectedConfigName")
             setupServerSelector()
@@ -1050,7 +1211,7 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
                     serverSelectContainer.isEnabled = true
-                    serverSelectContainer.alpha = 1.0f
+                    serverSelectTextView.alpha = 1.0f
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
 
@@ -1653,10 +1814,21 @@ class MainActivity : AppCompatActivity() {
                     activeId = null
                     selectedConfigContent = null
                     selectedConfigName = "Unknown"
-                    saveConfigToPrefs("", "Unknown")
+                    // Удаляем старые ключи вместо записи пустоты:
+                    prefs.edit()
+                        .remove("config_content")
+                        .remove("config_name")
+                        .remove("active_config_id")
+                        .apply()
                     availableServers.clear()
                     serverSelectContainer.visibility = View.GONE
                 }
+            }
+
+            // Очищаем ссылку, если список конфигов опустел
+            if (configs.isEmpty()) {
+                prefs.edit().remove(PREF_SUBSCRIPTION_URL).apply()
+                logToConsole("Все конфигурации удалены: ссылка сброшена")
             }
 
             saveConfigsToPrefs(configs, activeId)
@@ -1969,11 +2141,11 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
         val configs = getSavedConfigs()
 
-        // Миграция старых данных, если список пуст
+        // Миграция старых данных: создаем элемент ТОЛЬКО если есть РЕАЛЬНЫЙ непустой контент
         if (configs.isEmpty()) {
             val oldContent = prefs.getString("config_content", null)
-            val oldName = prefs.getString("config_name", "Unknown")
-            if (oldContent != null) {
+            val oldName = prefs.getString("config_name", null)
+            if (!oldContent.isNullOrBlank()) {
                 val item = ConfigItem(name = oldName ?: "Config 1", content = oldContent)
                 configs.add(item)
                 saveConfigsToPrefs(configs, item.id)
@@ -1987,6 +2159,15 @@ class MainActivity : AppCompatActivity() {
             selectedConfigContent = activeItem.content
             selectedConfigName = activeItem.name
             prefs.edit().putString("active_config_id", activeItem.id).apply()
+        } else {
+            // Если конфигов нет совсем — полностью сбрасываем состояние
+            selectedConfigContent = null
+            selectedConfigName = "Unknown"
+            prefs.edit()
+                .remove("active_config_id")
+                .remove("config_content")
+                .remove("config_name")
+                .apply()
         }
     }
 
@@ -2119,4 +2300,146 @@ class MainActivity : AppCompatActivity() {
             override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
         }
     }
+
+    private fun checkInitialUrl() {
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val savedUrl = prefs.getString(PREF_SUBSCRIPTION_URL, null)
+
+        if (savedUrl.isNullOrBlank()) {
+            showEnterUrlDialog()
+        } else {
+            logToConsole("Используется сохраненная ссылка: $savedUrl")
+        }
+    }
+
+
+    private fun downloadAndApplyConfigFromUrl(
+        initialUrl: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        logToConsole("Загрузка конфигурации из URL: $initialUrl")
+
+        Thread {
+            var currentUrl = initialUrl
+            var redirectsCount = 0
+            val maxRedirects = 5
+            var content: String? = null
+
+            // 1. Отключаем строгую проверку SSL-сертификатов (для обхода "Not secure")
+            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
+            })
+
+            try {
+                val sc = SSLContext.getInstance("TLS")
+                sc.init(null, trustAllCerts, SecureRandom())
+                HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
+                HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
+            } catch (e: Exception) {
+                Log.e("ANet", "SSL TrustAll setup failed: ${e.message}")
+            }
+
+            while (redirectsCount < maxRedirects) {
+                var connection: HttpURLConnection? = null
+                try {
+                    val urlObj = URL(currentUrl)
+                    connection = urlObj.openConnection() as HttpURLConnection
+                    connection.connectTimeout = 12000
+                    connection.readTimeout = 12000
+                    connection.requestMethod = "GET"
+                    connection.instanceFollowRedirects = false // Обрабатываем редиректы вручную
+                    connection.setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    )
+                    connection.setRequestProperty("Accept", "*/*")
+
+                    val status = connection.responseCode
+
+                    // 2. Обработка 301, 302, 303, 307, 308 редиректов
+                    if (status == HttpURLConnection.HTTP_MOVED_PERM ||
+                        status == HttpURLConnection.HTTP_MOVED_TEMP ||
+                        status == HttpURLConnection.HTTP_SEE_OTHER ||
+                        status == 307 || status == 308
+                    ) {
+                        val newUrl = connection.getHeaderField("Location")
+                        if (!newUrl.isNullOrBlank()) {
+                            // Если редирект относительный (напр. "/config.toml")
+                            currentUrl = if (newUrl.startsWith("http://") || newUrl.startsWith("https://")) {
+                                newUrl
+                            } else {
+                                URL(urlObj, newUrl).toString()
+                            }
+                            logToConsole("Редирект ($status) -> $currentUrl")
+                            redirectsCount++
+                            continue
+                        }
+                    }
+
+                    if (status == HttpURLConnection.HTTP_OK) {
+                        content = connection.inputStream.bufferedReader().use { it.readText() }
+                        break
+                    } else {
+                        runOnUiThread {
+                            onError("Сервер вернул код: HTTP $status")
+                        }
+                        return@Thread
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        val errorMsg = "Ошибка сети: ${e.localizedMessage ?: e.message}"
+                        logToConsole(errorMsg)
+                        onError(errorMsg)
+                    }
+                    return@Thread
+                } finally {
+                    connection?.disconnect()
+                }
+            }
+
+            if (content.isNullOrBlank()) {
+                runOnUiThread {
+                    onError("Не удалось получить содержимое файла (превышен лимит редиректов или пустой ответ)")
+                }
+                return@Thread
+            }
+
+            // 3. Проверяем, является ли скачанный файл валидным TOML-конфигом ANet
+            val servers = inspectServers(content, reportError = false)
+            if (servers != null && servers.isNotEmpty()) {
+                val rawName = currentUrl.substringAfterLast("/").substringBefore("?").ifBlank { "Subscription" }
+                val configName = if (rawName.endsWith(".toml", ignoreCase = true)) {
+                    rawName.substringBeforeLast(".toml")
+                } else {
+                    rawName
+                }
+
+                runOnUiThread {
+                    // Добавляем и активируем конфигурацию
+                    addAndActivateConfig(configName, content)
+
+                    // Сохраняем исходный URL в SharedPreferences
+                    val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().putString(PREF_SUBSCRIPTION_URL, initialUrl).apply()
+
+                    logToConsole("Конфигурация '$configName' успешно скачана и активирована!")
+                    Toast.makeText(this@MainActivity, "Активирован профиль: $configName", Toast.LENGTH_SHORT).show()
+                    onSuccess()
+                }
+            } else {
+                runOnUiThread {
+                    val errorMsg = "Файл по ссылке не является корректным TOML-конфигом ANet"
+                    logToConsole("Ошибка: $errorMsg")
+                    onError(errorMsg)
+                }
+            }
+        }.start()
+    }
+
+
 }
+
+
