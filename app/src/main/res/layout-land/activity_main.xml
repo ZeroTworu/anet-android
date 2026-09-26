@@ -137,23 +137,21 @@
             android:src="@drawable/chevron_down" />
     </LinearLayout>
 
-    <!-- ПРАВАЯ КОЛОНКА: Панель верхних кнопок -->
+    <!-- Панель кнопок (Остались только UPDATE и SETTINGS) -->
     <LinearLayout
         android:id="@+id/buttonLayout"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center"
+        android:gravity="center_horizontal|center_vertical"
         android:orientation="horizontal"
-        android:paddingTop="8dp"
-        android:paddingBottom="4dp"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/guideline"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/header">
 
         <Button
             android:id="@+id/btnCheckUpdate"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
             android:layout_weight="1"
             android:background="@android:color/transparent"
             android:clickable="true"
@@ -167,25 +165,9 @@
             app:iconTint="#fff" />
 
         <Button
-            android:id="@+id/btnScanQr"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:background="@android:color/transparent"
-            android:clickable="true"
-            android:focusable="true"
-            android:text="QR"
-            android:textColor="@color/buttons_icon_color"
-            android:textSize="@dimen/button_font_size"
-            app:icon="@drawable/qr"
-            app:iconGravity="textTop"
-            app:iconPadding="@dimen/icon_padding"
-            app:iconTint="#FFFFFF" />
-
-        <Button
-            android:id="@+id/selectApps"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:id="@+id/btnSettings"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
             android:layout_weight="1"
             android:background="@android:color/transparent"
             android:clickable="true"
@@ -193,34 +175,13 @@
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:padding="0dp"
-            android:text="Apps"
-            android:textColor="@color/buttons_icon_color"
-            android:textColorLink="#716B6B"
-            android:textSize="@dimen/button_font_size"
-            app:icon="@drawable/app"
-            app:iconGravity="textTop"
-            app:iconPadding="@dimen/icon_padding"
-            app:iconSize="28dp"
-            app:iconTint="#FFFFFF" />
-
-        <Button
-            android:id="@+id/selectConfig"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:background="@android:color/transparent"
-            android:clickable="true"
-            android:focusable="true"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:padding="0dp"
-            android:text="Config"
+            android:text="Settings"
             android:textColor="@color/buttons_icon_color"
             android:textSize="@dimen/button_font_size"
-            app:icon="@drawable/add"
+            app:icon="@drawable/ic_settings"
             app:iconGravity="textTop"
             app:iconPadding="@dimen/icon_padding"
-            app:iconSize="28dp"
+            app:iconSize="32dp"
             app:iconTint="#FFFFFF" />
     </LinearLayout>
 

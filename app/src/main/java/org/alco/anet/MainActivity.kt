@@ -90,19 +90,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvRxm: TextView
     private lateinit var tvTxm: TextView
 
+    private var isScanningQr = false
     private lateinit var connectionStatusLabel: TextView
     private lateinit var connectButton: Button
     private lateinit var spinner: ImageView
-    private lateinit var selectConfigButton: Button
-    private lateinit var btnScanQr: Button
     private lateinit var btnCheckUpdate: Button
     private lateinit var btnShowLogs: Button
+    private lateinit var btnSettings: Button
 
     private lateinit var serverSelectContainer: LinearLayout
     private lateinit var serverSelectTextView: TextView
     private lateinit var serverSelectIcon: ImageView
-
-    private lateinit var selectAppsButton: Button
     private var activeErrorDialog: AlertDialog? = null
 
     // Буфер и управление окном логов.
@@ -388,6 +386,8 @@ class MainActivity : AppCompatActivity() {
 
     // --- Google Barcode Scanner (ML Kit) ---
     private fun startQrScanner() {
+        isScanningQr = true // Отмечаем, что открыт QR-сканер
+
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
             .build()
@@ -395,20 +395,38 @@ class MainActivity : AppCompatActivity() {
         val scanner = GmsBarcodeScanning.getClient(this, options)
         scanner.startScan()
             .addOnSuccessListener { barcode ->
+                isScanningQr = false
                 val url = barcode.rawValue
                 if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    Toast.makeText(this, "QR распознан, загрузка профиля...", Toast.LENGTH_SHORT).show()
                     downloadConfigFromUrl(url)
                 } else {
                     logToConsole("Неверный формат ссылки: $url")
+                    Toast.makeText(this, "QR-код не содержит валидную ссылку", Toast.LENGTH_SHORT).show()
+                    if (getSavedConfigs().isEmpty()) {
+                        checkInitialUrl()
+                    }
+                }
+            }
+            .addOnCanceledListener {
+                isScanningQr = false
+                logToConsole("QR Сканирование отменено пользователем")
+                Toast.makeText(this, "QR-сканирование отменено", Toast.LENGTH_SHORT).show()
+                if (getSavedConfigs().isEmpty()) {
+                    checkInitialUrl()
                 }
             }
             .addOnFailureListener { e ->
-                logToConsole("QR Сканирование отменено или ошибка: ${e.message}")
+                isScanningQr = false
+                logToConsole("QR Сканирование ошибка: ${e.message}")
+                Toast.makeText(this, "Ошибка QR-сканера: ${e.message}", Toast.LENGTH_SHORT).show()
+                if (getSavedConfigs().isEmpty()) {
+                    checkInitialUrl()
+                }
             }
     }
-
     private fun downloadConfigFromUrl(url: String) {
-        logToConsole("Загрузка конфигурации...")
+        logToConsole("Загрузка конфигурации по ссылке...")
         spinner.visibility = View.VISIBLE
 
         Thread {
@@ -425,8 +443,10 @@ class MainActivity : AppCompatActivity() {
                     if (inspectServers(content, reportError = false) != null) {
                         runOnUiThread {
                             spinner.visibility = View.INVISIBLE
-                            addAndActivateConfig("QR-Imported", content)
+                            val configName = "QR-Imported"
+                            addAndActivateConfig(configName, content)
                             logToConsole("Профиль импортирован по QR-коду!")
+                            Toast.makeText(this@MainActivity, "Профиль успешно импортирован!", Toast.LENGTH_SHORT).show()
 
                             logToConsole(">>> Автозапуск соединения...")
                             checkPermissionsAndStart()
@@ -434,40 +454,67 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         runOnUiThread {
                             spinner.visibility = View.INVISIBLE
-                            logToConsole("Ошибка: файл по ссылке не является TOML-конфигом ANet")
+                            val errorMsg = "Ошибка: файл по ссылке не является TOML-конфигом ANet"
+                            logToConsole(errorMsg)
+                            Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_LONG).show()
+                            if (getSavedConfigs().isEmpty()) {
+                                checkInitialUrl()
+                            }
                         }
                     }
                 } else {
                     runOnUiThread {
                         spinner.visibility = View.INVISIBLE
-                        logToConsole("Сервер вернул ошибку: ${connection.responseCode}")
+                        val errorMsg = "Сервер вернул ошибку: HTTP ${connection.responseCode}"
+                        logToConsole(errorMsg)
+                        Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
+                        if (getSavedConfigs().isEmpty()) {
+                            checkInitialUrl()
+                        }
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     spinner.visibility = View.INVISIBLE
-                    logToConsole("Ошибка скачивания: ${e.message}")
+                    val errorMsg = "Ошибка скачивания: ${e.localizedMessage ?: e.message}"
+                    logToConsole(errorMsg)
+                    Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
+                    if (getSavedConfigs().isEmpty()) {
+                        checkInitialUrl()
+                    }
                 }
             } finally {
                 connection?.disconnect()
             }
         }.start()
     }
-
     // --- LAUNCHERS ---
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        uri?.let {
-            val content = readTextFromUri(it)
-            val name = getFileName(it)
+        if (uri != null) {
+            val content = readTextFromUri(uri)
+            val name = getFileName(uri)
 
             if (content.isNotEmpty() && inspectServers(content) != null) {
                 addAndActivateConfig(name, content)
                 logToConsole("Loaded config: $name (${content.length} bytes)")
+                Toast.makeText(this, "Конфигурация \"$name\" успешно добавлена!", Toast.LENGTH_SHORT).show()
             } else {
                 logToConsole("Failed to read config file")
+                Toast.makeText(this, "Ошибка: некорректный .toml конфиг", Toast.LENGTH_LONG).show()
+                // Если конфигов по-прежнему нет — возвращаем диалог
+                if (getSavedConfigs().isEmpty()) {
+                    checkInitialUrl()
+                }
+            }
+        } else {
+            // Пользователь нажал "Назад" в проводнике
+            Toast.makeText(this, "Выбор файла отменён", Toast.LENGTH_SHORT).show()
+            // Если конфигов нет — снова открываем окно ввода ссылки
+            if (getSavedConfigs().isEmpty()) {
+                checkInitialUrl()
             }
         }
     }
@@ -604,6 +651,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // 1. Кнопка "Отмена" -> Закрывает приложение
         val btnCancel = Button(this).apply {
             text = "Отмена"
             setTextColor(Color.parseColor("#AAAAAA"))
@@ -611,13 +659,23 @@ class MainActivity : AppCompatActivity() {
             setupTvFocusAnimator()
         }
 
-        val btnCustomConfig = Button(this).apply {
-            text = "Свой конфиг"
+        // 2. Кнопка "QR" -> Сканирование QR-кода
+        val btnQr = Button(this).apply {
+            text = "QR"
             setTextColor(Color.parseColor("#EEBC7A"))
             setBackgroundColor(Color.TRANSPARENT)
             setupTvFocusAnimator()
         }
 
+        // 3. Кнопка "Конфиг" -> Открытие выбора файла
+        val btnFileConfig = Button(this).apply {
+            text = "Конфиг"
+            setTextColor(Color.parseColor("#EEBC7A"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        // 4. Кнопка "ОК" -> Загрузка .toml по ссылке и активация
         val btnOk = Button(this).apply {
             text = "ОК"
             setTextColor(Color.parseColor("#00E676"))
@@ -626,7 +684,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         buttonBar.addView(btnCancel)
-        buttonBar.addView(btnCustomConfig)
+        buttonBar.addView(btnQr)
+        buttonBar.addView(btnFileConfig)
         buttonBar.addView(btnOk)
 
         container.addView(titleTv)
@@ -640,15 +699,25 @@ class MainActivity : AppCompatActivity() {
             .setCancelable(false)
             .create()
 
+        // Действие "Отмена"
         btnCancel.setOnClickListener {
             dialog.dismiss()
             finishAffinity()
         }
 
-        btnCustomConfig.setOnClickListener {
+        // Действие "QR"
+        btnQr.setOnClickListener {
             dialog.dismiss()
+            startQrScanner()
         }
 
+        // Действие "Конфиг" (выбор файла)
+        btnFileConfig.setOnClickListener {
+            dialog.dismiss()
+            filePickerLauncher.launch(arrayOf("*/*"))
+        }
+
+        // Действие "ОК"
         btnOk.setOnClickListener {
             val url = input.text.toString().trim()
             if (url.isEmpty()) {
@@ -663,10 +732,10 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Блокируем кнопки и показываем индикатор загрузки
             btnOk.isEnabled = false
             btnCancel.isEnabled = false
-            btnCustomConfig.isEnabled = false
+            btnQr.isEnabled = false
+            btnFileConfig.isEnabled = false
             errorTv.visibility = View.GONE
             loadingBar.visibility = View.VISIBLE
 
@@ -678,7 +747,8 @@ class MainActivity : AppCompatActivity() {
                 onError = { error ->
                     btnOk.isEnabled = true
                     btnCancel.isEnabled = true
-                    btnCustomConfig.isEnabled = true
+                    btnQr.isEnabled = true
+                    btnFileConfig.isEnabled = true
                     loadingBar.visibility = View.GONE
                     errorTv.text = error
                     errorTv.visibility = View.VISIBLE
@@ -879,20 +949,20 @@ class MainActivity : AppCompatActivity() {
         connectionStatusLabel = findViewById(R.id.connectionStatus)
         connectButton = findViewById(R.id.connect)
         spinner = findViewById(R.id.connectSpinner)
-        selectConfigButton = findViewById(R.id.selectConfig)
-        btnScanQr = findViewById(R.id.btnScanQr)
+
         btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
         btnShowLogs = findViewById(R.id.btnShowLogs)
+
+        btnSettings = findViewById(R.id.btnSettings)
+        btnSettings.setupTvFocusAnimator()
+
+        btnSettings.setOnClickListener {
+            showSettingsDialog()
+        }
 
         serverSelectContainer = findViewById(R.id.serverSelectContainer)
         serverSelectTextView = findViewById(R.id.serverSelectTextView)
         serverSelectIcon = findViewById(R.id.serverSelectIcon)
-
-        selectAppsButton = findViewById(R.id.selectApps)
-
-        selectAppsButton.setOnClickListener {
-            startActivity(Intent(this, AppSelectionActivity::class.java))
-        }
 
         btnShowLogs.setOnClickListener {
             showLogsDialog()
@@ -932,26 +1002,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Вызов менеджера конфигураций вместо прямого выбора файла
-        selectConfigButton.setOnClickListener {
-            showConfigManagerDialog()
-        }
-
-        btnScanQr.setOnClickListener {
-            startQrScanner()
-        }
-
         setUiState(State.DISCONNECTED)
 
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
         connectButton.setupTvFocusAnimator()
-        selectConfigButton.setupTvFocusAnimator()
-        btnScanQr.setupTvFocusAnimator()
         btnCheckUpdate.setupTvFocusAnimator()
         serverSelectContainer.setupTvFocusAnimator()
-        selectAppsButton.setupTvFocusAnimator()
         btnShowLogs.setupTvFocusAnimator()
 
         btnCheckUpdate.setOnClickListener {
@@ -1042,6 +1100,16 @@ class MainActivity : AppCompatActivity() {
         val stateCode =
             if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
         handleVpnState(stateCode, "", getVpnServerName())
+
+        // ЕСЛИ ПОЛЬЗОВАТЕЛЬ ВЕРНУЛСЯ ИЗ QR-СКАНЕРА БЕЗ ВЫБОРА КОНФИГА:
+        if (isScanningQr) {
+            isScanningQr = false
+            if (getSavedConfigs().isEmpty()) {
+                mainHandler.postDelayed({
+                    checkInitialUrl()
+                }, 150)
+            }
+        }
     }
 
     // --- LOGIC ---
@@ -1164,12 +1232,6 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             currentUiState = state
             val controlsEnabled = state == State.DISCONNECTED
-            btnScanQr.isEnabled = controlsEnabled
-            btnScanQr.alpha = if (controlsEnabled) 1.0f else 0.3f
-            selectAppsButton.isEnabled = controlsEnabled
-            selectAppsButton.alpha = if (controlsEnabled) 1.0f else 0.3f
-            selectConfigButton.isEnabled = controlsEnabled
-            selectConfigButton.alpha = if (controlsEnabled) 1.0f else 0.3f
             btnCheckUpdate.isEnabled = controlsEnabled && !isCheckingUpdates
             btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
 
@@ -1212,6 +1274,7 @@ class MainActivity : AppCompatActivity() {
 
                     serverSelectContainer.isEnabled = true
                     serverSelectTextView.alpha = 1.0f
+                    btnSettings.alpha = 1.0f
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
 
@@ -1271,6 +1334,8 @@ class MainActivity : AppCompatActivity() {
                     serverSelectContainer.isEnabled = false
                     //serverSelectContainer.alpha = 1.0f
                     serverSelectTextView.alpha = 0.3f
+                    btnSettings.alpha = 0.3f
+
                 }
 
                 State.CONNECTED -> {
@@ -1414,7 +1479,7 @@ class MainActivity : AppCompatActivity() {
         headerLayout.addView(btnClose)
         headerLayout.addView(titleView)
 
-        // 2. Кнопка "+ Добавить конфигурацию"
+        // 2. Кнопка "+ Добавить конфигурацию" (из файла)
         val btnAddConfigLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -1428,7 +1493,7 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(0, 0, 0, 20.dpToPx())
+                setMargins(0, 0, 0, 10.dpToPx())
             }
             isClickable = true
             isFocusable = true
@@ -1456,7 +1521,49 @@ class MainActivity : AppCompatActivity() {
         btnAddConfigLayout.addView(iconPlus)
         btnAddConfigLayout.addView(textPlus)
 
-        // 3. Заголовок раздела "ВАШИ КОНФИГУРАЦИИ"
+        // 3. Кнопка "Импорт по QR" (QR-сканер)
+        val btnAddQrLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(16.dpToPx(), 14.dpToPx(), 16.dpToPx(), 14.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 12 * resources.displayMetrics.density
+                setColor(Color.parseColor("#1C1C1E"))
+                setStroke(1.dpToPx(), Color.parseColor("#2C2C2E"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 20.dpToPx())
+            }
+            isClickable = true
+            isFocusable = true
+            setupTvFocusAnimator()
+            setOnClickListener {
+                startQrScanner()
+            }
+        }
+
+        val iconQr = ImageView(this).apply {
+            setImageResource(R.drawable.qr)
+            setColorFilter(Color.parseColor("#EEBC7A"))
+            val iconSize = 18.dpToPx()
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                setMargins(0, 0, 8.dpToPx(), 0)
+            }
+        }
+
+        val textQr = TextView(this).apply {
+            text = "Импорт по QR"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(Color.WHITE)
+        }
+
+        btnAddQrLayout.addView(iconQr)
+        btnAddQrLayout.addView(textQr)
+
+        // 4. Заголовок раздела "ВАШИ КОНФИГУРАЦИИ"
         val sectionTitle = TextView(this).apply {
             text = "ВАШИ КОНФИГУРАЦИИ"
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
@@ -1466,11 +1573,11 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(0, 8.dpToPx(), 0, 12.dpToPx())
+                setMargins(0, 4.dpToPx(), 0, 12.dpToPx())
             }
         }
 
-        // 4. Прокручиваемый список карточек
+        // 5. Прокручиваемый список карточек
         val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1491,6 +1598,7 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.addView(headerLayout)
         rootLayout.addView(btnAddConfigLayout)
+        rootLayout.addView(btnAddQrLayout)
         rootLayout.addView(sectionTitle)
         rootLayout.addView(scrollView)
 
@@ -1521,7 +1629,6 @@ class MainActivity : AppCompatActivity() {
                     setPadding(8.dpToPx(), 12.dpToPx(), 8.dpToPx(), 12.dpToPx())
                     background = android.graphics.drawable.GradientDrawable().apply {
                         cornerRadius = 14 * resources.displayMetrics.density
-                        // Серо-зеленый цвет для активного и тёмный #1C1C1E для неактивного
                         setColor(if (isActive) Color.parseColor("#375417") else Color.parseColor("#1C1C1E"))
                     }
                     layoutParams = LinearLayout.LayoutParams(
@@ -1533,7 +1640,6 @@ class MainActivity : AppCompatActivity() {
                     setupTvFocusAnimator()
                 }
 
-                // Иконка состояния selection
                 val ivIndicator = ImageView(this).apply {
                     setImageResource(if (isActive) R.drawable.leftchev else R.drawable.uncheck)
                     setColorFilter(if (isActive) Color.parseColor("#669D29") else Color.parseColor("#3b3b3b"))
@@ -1543,7 +1649,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Название конфигурации
                 val nameTv = TextView(this).apply {
                     text = item.name
                     setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -1552,7 +1657,6 @@ class MainActivity : AppCompatActivity() {
                         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
                 }
 
-                // Выбор конфигурации по клику на карточку
                 itemLayout.setOnClickListener {
                     if (isVpnConnected) {
                         logToConsole("Нельзя менять конфигурацию во время активного подключения")
@@ -1567,7 +1671,6 @@ class MainActivity : AppCompatActivity() {
                     populateList()
                 }
 
-                // Кнопка редактирования (pen.xml)
                 val btnRename = android.widget.ImageButton(this).apply {
                     setImageResource(R.drawable.pen)
                     setColorFilter(Color.parseColor("#AAAAAA"))
@@ -1583,7 +1686,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Кнопка удаления (delete.xml)
                 val btnDelete = android.widget.ImageButton(this).apply {
                     setImageResource(R.drawable.delete)
                     setColorFilter(Color.parseColor("#AAAAAA"))
@@ -1617,6 +1719,18 @@ class MainActivity : AppCompatActivity() {
             .setOnDismissListener {
                 activeConfigDialog = null
                 refreshConfigListRunnable = null
+
+                // ЕСЛИ ПОСЛЕ ЗАКРЫТИЯ ОКНА СПИСОК КОНФИГУРАЦИЙ ПУСТ — ПОКАЗЫВАЕМ "ВВЕДИТЕ ССЫЛКУ"
+                if (getSavedConfigs().isEmpty()) {
+                    mainHandler.postDelayed({
+                        checkInitialUrl()
+                    }, 100)
+                }                // 2. Если конфиги есть и мы пришли из настроек — возвращаем в SETTINGS
+                else if (returnToSettings) {
+                    mainHandler.postDelayed({
+                        showSettingsDialog()
+                    }, 100)
+                }
             }
             .create()
 
@@ -1629,13 +1743,11 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
         dialog.setContentView(rootLayout)
 
-        // 2. Настраиваем окно диалога ПОСЛЕ вызова show()
         dialog.window?.apply {
             setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            // Убираем системный фон диалога, который оставляет стандартные рамки по бокам
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
     }
@@ -2312,6 +2424,339 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Модель пункта меню настроек
+    data class SettingItem(
+        val title: String,
+        val subtitle: String,
+        val iconRes: Int,
+        val onClick: () -> Unit
+    )
+
+    // --- ГЛАВНОЕ ОКНО НАСТРОЕК (SETTINGS) ---
+    private fun showSettingsDialog() {
+        var dialogInstance: AlertDialog? = null
+
+        val settingsList = listOf(
+            // 1. Конфигурации
+            SettingItem(
+                title = "Конфигурации",
+                subtitle = "Управление профилями, добавление файлов и QR",
+                iconRes = R.drawable.file
+            ) {
+                dialogInstance?.dismiss()
+                showConfigManagerDialog()
+            },
+            // 2. Раздельное туннелирование
+            SettingItem(
+                title = "Раздельное туннелирование",
+                subtitle = "Выбор приложений, работающих через VPN",
+                iconRes = R.drawable.apps_white
+            ) {
+                startActivity(Intent(this, AppSelectionActivity::class.java))
+            }
+        )
+
+        val rootLayout = LinearLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#121212"))
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setPadding(20.dpToPx(), 20.dpToPx(), 20.dpToPx(), 20.dpToPx())
+        }
+
+        // Шапка
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 24.dpToPx())
+            }
+        }
+
+        val btnClose = android.widget.ImageButton(this).apply {
+            setImageResource(R.drawable.ic_back)
+            setColorFilter(Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#262626"))
+            }
+            val buttonSize = 40.dpToPx()
+            val paddingSize = 10.dpToPx()
+            layoutParams = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+                setMargins(0, 0, 16.dpToPx(), 0)
+            }
+            setPadding(paddingSize, paddingSize, paddingSize, paddingSize)
+            setupTvFocusAnimator()
+        }
+
+        val titleView = TextView(this).apply {
+            text = "Настройки"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        headerLayout.addView(btnClose)
+        headerLayout.addView(titleView)
+
+        val sectionTitle = TextView(this).apply {
+            text = "ПАРАМЕТРЫ ПРИЛОЖЕНИЯ"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor("#7E7E7E"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 4.dpToPx(), 0, 12.dpToPx())
+            }
+        }
+
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+
+        val listContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        for (item in settingsList) {
+            val itemCard = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(16.dpToPx(), 14.dpToPx(), 16.dpToPx(), 14.dpToPx())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 14 * resources.displayMetrics.density
+                    setColor(Color.parseColor("#1C1C1E"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 6.dpToPx(), 0, 6.dpToPx())
+                }
+                isClickable = true
+                isFocusable = true
+                setupTvFocusAnimator()
+                setOnClickListener {
+                    item.onClick()
+                }
+            }
+
+            val iconView = ImageView(this).apply {
+                setImageResource(item.iconRes)
+                setColorFilter(Color.parseColor("#EEBC7A"))
+                val iconSize = 22.dpToPx()
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                    setMargins(0, 0, 14.dpToPx(), 0)
+                }
+            }
+
+            val textContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+
+            val tvTitle = TextView(this).apply {
+                text = item.title
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.WHITE)
+            }
+
+            val tvSubtitle = TextView(this).apply {
+                text = item.subtitle
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(Color.parseColor("#8E8E93"))
+                setPadding(0, 2.dpToPx(), 0, 0)
+            }
+
+            textContainer.addView(tvTitle)
+            textContainer.addView(tvSubtitle)
+
+            val chevron = ImageView(this).apply {
+                setImageResource(R.drawable.chevron_down)
+                setColorFilter(Color.parseColor("#5A5A5E"))
+                rotation = 270f
+                val iconSize = 18.dpToPx()
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            }
+
+            itemCard.addView(iconView)
+            itemCard.addView(textContainer)
+            itemCard.addView(chevron)
+
+            listContainer.addView(itemCard)
+        }
+
+        scrollView.addView(listContainer)
+        rootLayout.addView(headerLayout)
+        rootLayout.addView(sectionTitle)
+        rootLayout.addView(scrollView)
+
+        dialogInstance = AlertDialog.Builder(this).create()
+
+        btnClose.setOnClickListener {
+            dialogInstance.dismiss()
+        }
+
+        dialogInstance.show()
+        dialogInstance.setContentView(rootLayout)
+        dialogInstance.window?.apply {
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+    }
+    // --- ВЛОЖЕННОЕ ОКНО ДЛЯ ПУНКТОВ НАСТРОЕК (ПОЛНОЭКРАННОЕ С КАРТОЧКАМИ) ---
+    private fun showSubSettingDialog(
+        title: String,
+        description: String,
+        stubDetails: List<Pair<String, String>>
+    ) {
+        val rootLayout = LinearLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#121212"))
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setPadding(20.dpToPx(), 20.dpToPx(), 20.dpToPx(), 20.dpToPx())
+        }
+
+        // Шапка
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 24.dpToPx())
+            }
+        }
+
+        val btnClose = android.widget.ImageButton(this).apply {
+            setImageResource(R.drawable.ic_back)
+            setColorFilter(Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#262626"))
+            }
+            val buttonSize = 40.dpToPx()
+            val paddingSize = 10.dpToPx()
+            layoutParams = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+                setMargins(0, 0, 16.dpToPx(), 0)
+            }
+            setPadding(paddingSize, paddingSize, paddingSize, paddingSize)
+            setupTvFocusAnimator()
+        }
+
+        val titleView = TextView(this).apply {
+            text = title
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        headerLayout.addView(btnClose)
+        headerLayout.addView(titleView)
+
+        // Описание секции
+        val descView = TextView(this).apply {
+            text = description
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(Color.parseColor("#8E8E93"))
+            setPadding(0, 0, 0, 16.dpToPx())
+        }
+
+        // Контейнер с карточками опций
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+
+        val listContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        for ((key, value) in stubDetails) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(16.dpToPx(), 16.dpToPx(), 16.dpToPx(), 16.dpToPx())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 14 * resources.displayMetrics.density
+                    setColor(Color.parseColor("#1C1C1E"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 6.dpToPx(), 0, 6.dpToPx())
+                }
+                isClickable = true
+                isFocusable = true
+                setupTvFocusAnimator()
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, "$key: $value", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            val tvKey = TextView(this).apply {
+                text = key
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+
+            val tvValue = TextView(this).apply {
+                text = value
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextColor(Color.parseColor("#EEBC7A"))
+            }
+
+            card.addView(tvKey)
+            card.addView(tvValue)
+            listContainer.addView(card)
+        }
+
+        scrollView.addView(listContainer)
+        rootLayout.addView(headerLayout)
+        rootLayout.addView(descView)
+        rootLayout.addView(scrollView)
+
+        val dialog = AlertDialog.Builder(this).create()
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        dialog.show()
+        dialog.setContentView(rootLayout)
+        dialog.window?.apply {
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+    }
 
     private fun downloadAndApplyConfigFromUrl(
         initialUrl: String,
