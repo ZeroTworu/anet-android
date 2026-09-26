@@ -78,7 +78,7 @@ data class ServerModel(val id: String, val name: String) {
 data class ConfigItem(
     val id: String = UUID.randomUUID().toString(),
     var name: String,
-    val content: String
+    var content: String
 )
 
 class MainActivity : AppCompatActivity() {
@@ -1428,7 +1428,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- ДИАЛОГ МЕНЕДЖЕРА КОНФИГУРАЦИЙ ---
 
-    private fun showConfigManagerDialog() {
+    private fun showConfigManagerDialog(returnToSettings: Boolean = false) {
         val rootLayout = LinearLayout(this).apply {
             setBackgroundColor(Color.parseColor("#121212"))
             orientation = LinearLayout.VERTICAL
@@ -1720,16 +1720,9 @@ class MainActivity : AppCompatActivity() {
                 activeConfigDialog = null
                 refreshConfigListRunnable = null
 
-                // ЕСЛИ ПОСЛЕ ЗАКРЫТИЯ ОКНА СПИСОК КОНФИГУРАЦИЙ ПУСТ — ПОКАЗЫВАЕМ "ВВЕДИТЕ ССЫЛКУ"
+                // Если список удалили до нуля — показываем окно ввода ссылки
                 if (getSavedConfigs().isEmpty()) {
-                    mainHandler.postDelayed({
-                        checkInitialUrl()
-                    }, 100)
-                }                // 2. Если конфиги есть и мы пришли из настроек — возвращаем в SETTINGS
-                else if (returnToSettings) {
-                    mainHandler.postDelayed({
-                        showSettingsDialog()
-                    }, 100)
+                    checkInitialUrl()
                 }
             }
             .create()
@@ -2433,20 +2426,29 @@ class MainActivity : AppCompatActivity() {
     )
 
     // --- ГЛАВНОЕ ОКНО НАСТРОЕК (SETTINGS) ---
+    // --- ГЛАВНОЕ ОКНО НАСТРОЕК (SETTINGS) ---
     private fun showSettingsDialog() {
         var dialogInstance: AlertDialog? = null
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val currentSubUrl = prefs.getString(PREF_SUBSCRIPTION_URL, null)
 
         val settingsList = listOf(
-            // 1. Конфигурации
             SettingItem(
                 title = "Конфигурации",
                 subtitle = "Управление профилями, добавление файлов и QR",
                 iconRes = R.drawable.file
             ) {
-                dialogInstance?.dismiss()
+                // Открываем поверх окна настроек без dismiss
                 showConfigManagerDialog()
             },
-            // 2. Раздельное туннелирование
+            SettingItem(
+                title = "Ссылка на конфигурацию",
+                subtitle = if (!currentSubUrl.isNullOrBlank()) currentSubUrl else "Не указана (нажмите для ввода)",
+                iconRes = R.drawable.qr
+            ) {
+                // Открываем поверх окна настроек без dismiss
+                showEditSubscriptionUrlDialog()
+            },
             SettingItem(
                 title = "Раздельное туннелирование",
                 subtitle = "Выбор приложений, работающих через VPN",
@@ -2466,7 +2468,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(20.dpToPx(), 20.dpToPx(), 20.dpToPx(), 20.dpToPx())
         }
 
-        // Шапка
         val headerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -2583,6 +2584,8 @@ class MainActivity : AppCompatActivity() {
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
                 setTextColor(Color.parseColor("#8E8E93"))
                 setPadding(0, 2.dpToPx(), 0, 0)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }
 
             textContainer.addView(tvTitle)
@@ -2757,6 +2760,219 @@ class MainActivity : AppCompatActivity() {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
     }
+
+
+
+    /**
+     * Удаляет указанные поля из текста конфига для корректного сравнения
+     */
+    private fun sanitizeTomlForComparison(toml: String): String {
+        return toml.lines().filterNot { line ->
+            val trimmed = line.trim()
+            trimmed.startsWith("dns_server_list", ignoreCase = true) ||
+                    trimmed.startsWith("exclude_route_for", ignoreCase = true)
+        }.joinToString("\n").trim()
+    }
+
+    /**
+     * Извлекает значение определенного поля из исходного TOML текста (например "dns_server_list = [...]")
+     */
+    private fun extractFieldLine(toml: String, fieldPrefix: String): String? {
+        return toml.lines().find { it.trim().startsWith(fieldPrefix, ignoreCase = true) }
+    }
+
+    /**
+     * Заменяет или добавляет поле в целевой TOML контент
+     */
+    private fun mergePreservedFields(remoteToml: String, localToml: String): String {
+        var merged = remoteToml
+
+        // Список полей, которые мы сохраняем из локального конфига
+        val preservedFields = listOf("dns_server_list", "exclude_route_for")
+
+        for (field in preservedFields) {
+            val localLine = extractFieldLine(localToml, field)
+            if (localLine != null) {
+                // Если в новом конфиге есть такое поле — заменяем его на локальное
+                val remoteLine = extractFieldLine(merged, field)
+                merged = if (remoteLine != null) {
+                    merged.replace(remoteLine, localLine)
+                } else {
+                    // Если в новом конфиге его не было — добавляем в конец
+                    "$merged\n$localLine"
+                }
+            }
+        }
+        return merged
+    }
+
+
+    // --- ДИАЛОГ РЕДАКТИРОВАНИЯ ОСНОВНОЙ ССЫЛКИ В SETTINGS ---
+    private fun showEditSubscriptionUrlDialog(returnToSettings: Boolean = true) {
+        val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
+        val currentUrl = prefs.getString(PREF_SUBSCRIPTION_URL, "") ?: ""
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24.dpToPx(), 24.dpToPx(), 24.dpToPx(), 16.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16f * resources.displayMetrics.density
+                setColor(Color.parseColor("#1C1C1E"))
+            }
+        }
+
+        val titleTv = TextView(this).apply {
+            text = "Ссылка на конфигурацию"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 6.dpToPx())
+        }
+
+        val subtitleTv = TextView(this).apply {
+            text = "Используется для автоматического обновления профилей"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.parseColor("#8E8E93"))
+            setPadding(0, 0, 0, 16.dpToPx())
+        }
+
+        val input = EditText(this).apply {
+            setText(currentUrl)
+            setSelection(currentUrl.length)
+            hint = "https://example.com/config.toml"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#7E7E7E"))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(16.dpToPx(), 12.dpToPx(), 16.dpToPx(), 12.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * resources.displayMetrics.density
+                setColor(Color.parseColor("#2C2C2E"))
+            }
+        }
+
+        val errorTv = TextView(this).apply {
+            setTextColor(Color.parseColor("#FF5252"))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            visibility = View.GONE
+            setPadding(4.dpToPx(), 6.dpToPx(), 4.dpToPx(), 0)
+        }
+
+        val loadingBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 8.dpToPx(), 0, 0)
+            }
+        }
+
+        val buttonBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 14.dpToPx(), 0, 0)
+            }
+        }
+
+        // Кнопка "Очистить" (если ссылка уже была задана)
+        val btnClear = Button(this).apply {
+            text = "Очистить"
+            setTextColor(Color.parseColor("#FF5252"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        // Кнопка "Отмена"
+        val btnCancel = Button(this).apply {
+            text = "Отмена"
+            setTextColor(Color.parseColor("#AAAAAA"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        // Кнопка "Сохранить"
+        val btnSave = Button(this).apply {
+            text = "Сохранить"
+            setTextColor(Color.parseColor("#00E676"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setupTvFocusAnimator()
+        }
+
+        if (currentUrl.isNotEmpty()) {
+            buttonBar.addView(btnClear)
+        }
+        buttonBar.addView(btnCancel)
+        buttonBar.addView(btnSave)
+
+        container.addView(titleTv)
+        container.addView(subtitleTv)
+        container.addView(input)
+        container.addView(errorTv)
+        container.addView(loadingBar)
+        container.addView(buttonBar)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(container)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnClear.setOnClickListener {
+            prefs.edit().remove(PREF_SUBSCRIPTION_URL).apply()
+            logToConsole("Основная ссылка удалена")
+            Toast.makeText(this, "Ссылка удалена", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        btnSave.setOnClickListener {
+            val newUrl = input.text.toString().trim()
+
+            if (newUrl.isEmpty()) {
+                errorTv.text = "Ссылка не может быть пустой. Используйте 'Очистить' для удаления."
+                errorTv.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+
+            if (!newUrl.startsWith("http://", ignoreCase = true) && !newUrl.startsWith("https://", ignoreCase = true)) {
+                errorTv.text = "Ссылка должна начинаться с http:// или https://"
+                errorTv.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+
+            // Блокируем кнопки и проверяем загрузку
+            btnSave.isEnabled = false
+            btnCancel.isEnabled = false
+            btnClear.isEnabled = false
+            errorTv.visibility = View.GONE
+            loadingBar.visibility = View.VISIBLE
+
+            downloadAndApplyConfigFromUrl(
+                initialUrl = newUrl,
+                onSuccess = {
+                    dialog.dismiss()
+                },
+                onError = { error ->
+                    btnSave.isEnabled = true
+                    btnCancel.isEnabled = true
+                    btnClear.isEnabled = true
+                    loadingBar.visibility = View.GONE
+                    errorTv.text = error
+                    errorTv.visibility = View.VISIBLE
+                }
+            )
+        }
+
+        dialog.show()
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+    }
+
 
     private fun downloadAndApplyConfigFromUrl(
         initialUrl: String,
