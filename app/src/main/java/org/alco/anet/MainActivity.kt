@@ -2052,7 +2052,7 @@ class MainActivity : AppCompatActivity() {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = (convertView as? TextView) ?: TextView(context).apply {
                     setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
-                    setTextColor(ContextCompat.getColor(context, R.color.buttons_icon_color))
+                    setTextColor(ContextCompat.getColor(context, R.color.white))
                     setPadding(0, paddingV, 0, paddingV)
                     setTextIsSelectable(true) // Включает выделение текста долгим тапом и меню копирования
                 }
