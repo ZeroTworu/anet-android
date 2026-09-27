@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -68,6 +69,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import android.util.Log
+import android.view.MotionEvent
 
 // Вспомогательная структура данных для парсинга нод в Kotlin
 data class ServerModel(val id: String, val name: String) {
@@ -100,6 +102,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var serverSelectContainer: LinearLayout
     private lateinit var serverSelectTextView: TextView
+
+    private lateinit var serverIndicator: ImageView
     private lateinit var serverSelectIcon: ImageView
     private var activeErrorDialog: AlertDialog? = null
 
@@ -369,7 +373,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         serverSelectContainer.setOnClickListener {
-            if (isVpnConnected) return@setOnClickListener
+            if (isVpnConnected) {
+                Toast.makeText(this, "Соединение активно, выбор ноды заблокирован", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
             if (System.currentTimeMillis() - popupDismissTime < 250) {
                 return@setOnClickListener
@@ -382,6 +389,8 @@ class MainActivity : AppCompatActivity() {
                 listPopupWindow.show()
             }
         }
+
+
     }
 
     // --- Google Barcode Scanner (ML Kit) ---
@@ -962,6 +971,7 @@ class MainActivity : AppCompatActivity() {
 
         serverSelectContainer = findViewById(R.id.serverSelectContainer)
         serverSelectTextView = findViewById(R.id.serverSelectTextView)
+        serverIndicator = findViewById(R.id.serverIndicator)
         serverSelectIcon = findViewById(R.id.serverSelectIcon)
 
         btnShowLogs.setOnClickListener {
@@ -1178,7 +1188,9 @@ class MainActivity : AppCompatActivity() {
         text: String,
         offsetX: Int = 0,
         offsetY: Int = 0,
-        @ColorInt color: Int? = null
+        @ColorInt color: Int? = null,
+        widthDp: Int = 12,
+        heightDp: Int = 12
     ) {
         this.text = text
         val original = ContextCompat.getDrawable(context, iconRes) ?: return
@@ -1187,8 +1199,11 @@ class MainActivity : AppCompatActivity() {
             original.mutate().setColorFilter(color, PorterDuff.Mode.SRC_IN)
         }
 
+        val targetWidth = widthDp.dpToPx()
+        val targetHeight = heightDp.dpToPx()
+
         val finalDrawable = if (offsetX == 0 && offsetY == 0) {
-            original.apply { setBounds(0, 0, intrinsicWidth, intrinsicHeight) }
+            original.apply { setBounds(0, 0, targetWidth, targetHeight) }
         } else {
             object : Drawable() {
                 override fun draw(canvas: Canvas) {
@@ -1203,8 +1218,8 @@ class MainActivity : AppCompatActivity() {
                     original.setBounds(left, top, right, bottom)
                 }
 
-                override fun getIntrinsicWidth() = original.intrinsicWidth
-                override fun getIntrinsicHeight() = original.intrinsicHeight
+                override fun getIntrinsicWidth() = targetWidth
+                override fun getIntrinsicHeight() = targetHeight
                 override fun setAlpha(alpha: Int) {
                     original.alpha = alpha
                 }
@@ -1215,7 +1230,7 @@ class MainActivity : AppCompatActivity() {
 
                 override fun getOpacity() = original.opacity
             }.apply {
-                setBounds(0, 0, original.intrinsicWidth, original.intrinsicHeight)
+                setBounds(0, 0, targetWidth, targetHeight)
             }
         }
 
@@ -1248,8 +1263,6 @@ class MainActivity : AppCompatActivity() {
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
 
-
-
                     connectButton.text = "CONNECT"
                     connectButton.isEnabled = true
 
@@ -1266,14 +1279,16 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.setLeftIcon(
                         R.drawable.block,
                         "DISCONNECTED",
-                        offsetX = 0,
-                        offsetY = -2,
-                        color = (0xFFFF5252.toInt())
+                        offsetX = -2,
+                        offsetY = 0,
+                        color = (0xFFFF5252.toInt()),
+                        widthDp = 12,
+                        heightDp = 12
                     )
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
                     serverSelectContainer.isEnabled = true
-                    serverSelectTextView.alpha = 1.0f
+                    serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#9E9E9E"))
                     btnSettings.alpha = 1.0f
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
@@ -1323,19 +1338,19 @@ class MainActivity : AppCompatActivity() {
                     connectButton.background = createNeonRingDrawable(workingColors)
 
                     connectionStatusLabel.setLeftIcon(
-                        R.drawable.check,
-                        statusText,
-                        offsetX = 0,
-                        offsetY = -5,
-                        color = Color.TRANSPARENT
+                        R.drawable.update,
+                        "CONNECTING",
+                        offsetX = -2,
+                        offsetY = 0,
+                        color = (0xFFFE6102.toInt()),
+                        widthDp = 12,
+                        heightDp = 12
                     )
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
-                    serverSelectContainer.isEnabled = false
-                    //serverSelectContainer.alpha = 1.0f
-                    serverSelectTextView.alpha = 0.3f
+                    serverSelectContainer.isEnabled = true
+                    serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#669D29"))
                     btnSettings.alpha = 0.3f
-
                 }
 
                 State.CONNECTED -> {
@@ -1362,13 +1377,13 @@ class MainActivity : AppCompatActivity() {
                         "CONNECTED",
                         offsetX = -2,
                         offsetY = 0,
-                        color = (0xFF4CAF50.toInt())
+                        color = (0xFF4CAF50.toInt()),
+                        widthDp = 12,
+                        heightDp = 12
                     )
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
 
-                    serverSelectContainer.isEnabled = false
-                    //serverSelectContainer.alpha = 1.0f
-                    serverSelectTextView.alpha = 0.3f
+                    serverSelectContainer.isEnabled = true
                     serverSelectIcon.setImageResource(R.drawable.block)
                 }
             }
@@ -1406,13 +1421,6 @@ class MainActivity : AppCompatActivity() {
                 line
             }
 
-            // Если пользователь сейчас смотрит конец лога (или окно логов ещё не открыто) —
-            // после добавления строки нужно проскроллить вниз. Если же он прокрутил историю
-            // вверх, чтобы что-то почитать — не дёргаем его скролл.
-            val listView = activeLogListView
-            val wasNearBottom = listView == null || listView.childCount == 0 ||
-                    listView.lastVisiblePosition >= logLines.size - 1
-
             logLines.addLast(entry)
             if (logLines.size > MAX_LOG_LINES) {
                 logLines.removeFirst()
@@ -1420,8 +1428,13 @@ class MainActivity : AppCompatActivity() {
 
             activeLogAdapter?.notifyDataSetChanged()
 
-            if (wasNearBottom) {
-                listView?.post { listView.setSelection(logLines.size - 1) }
+            // Автопрокрутка в самый конец при получении новой записи
+            activeLogListView?.let { lv ->
+                lv.post {
+                    if (logLines.isNotEmpty()) {
+                        lv.setSelection(logLines.size - 1)
+                    }
+                }
             }
         }
     }
@@ -1948,6 +1961,8 @@ class MainActivity : AppCompatActivity() {
 
     // --- ДИАЛОГ ЛОГОВ ---
 
+    // --- ДИАЛОГ ЛОГОВ ---
+
     private fun showLogsDialog() {
         val rootLayout = LinearLayout(this).apply {
             setBackgroundColor(Color.parseColor("#121212"))
@@ -2019,9 +2034,6 @@ class MainActivity : AppCompatActivity() {
         headerLayout.addView(titleView)
         headerLayout.addView(btnSave)
 
-        // ListView вместо ScrollView+TextView: каждая строка лога — отдельный элемент,
-        // system переиспользует (recycle) view только для видимых строк, поэтому окно
-        // остаётся плавным независимо от того, сколько всего строк накопилось в логе.
         val listView = ListView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -2031,15 +2043,18 @@ class MainActivity : AppCompatActivity() {
             divider = null
             dividerHeight = 0
             setSelector(android.R.color.transparent)
+            transcriptMode = ListView.TRANSCRIPT_MODE_ALWAYS_SCROLL // Автоскролл списка при добавлении строк
+            isStackFromBottom = false
         }
 
-        val paddingV = 4.dpToPx()
+        val paddingV = 6.dpToPx()
         val adapter = object : ArrayAdapter<CharSequence>(this, 0, logLines) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val view = convertView as? TextView ?: TextView(context).apply {
-                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                val view = (convertView as? TextView) ?: TextView(context).apply {
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
                     setTextColor(ContextCompat.getColor(context, R.color.buttons_icon_color))
                     setPadding(0, paddingV, 0, paddingV)
+                    setTextIsSelectable(true) // Включает выделение текста долгим тапом и меню копирования
                 }
                 view.text = getItem(position)
                 return view
@@ -2070,17 +2085,20 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
         dialog.setContentView(rootLayout)
-        // 2. Настраиваем окно диалога ПОСЛЕ вызова show()
         dialog.window?.apply {
             setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            // Убираем системный фон диалога, который оставляет стандартные рамки по бокам
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
 
-        listView.post { listView.setSelection(logLines.size - 1) }
+        // Автопрокрутка в самый конец при открытии окна
+        if (logLines.isNotEmpty()) {
+            listView.post {
+                listView.setSelection(logLines.size - 1)
+            }
+        }
     }
 
     // --- СОХРАНЕНИЕ ЛОГА В ФАЙЛ ---
@@ -2426,7 +2444,6 @@ class MainActivity : AppCompatActivity() {
     )
 
     // --- ГЛАВНОЕ ОКНО НАСТРОЕК (SETTINGS) ---
-    // --- ГЛАВНОЕ ОКНО НАСТРОЕК (SETTINGS) ---
     private fun showSettingsDialog() {
         var dialogInstance: AlertDialog? = null
         val prefs = getSharedPreferences("anet_prefs", Context.MODE_PRIVATE)
@@ -2624,188 +2641,6 @@ class MainActivity : AppCompatActivity() {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
     }
-    // --- ВЛОЖЕННОЕ ОКНО ДЛЯ ПУНКТОВ НАСТРОЕК (ПОЛНОЭКРАННОЕ С КАРТОЧКАМИ) ---
-    private fun showSubSettingDialog(
-        title: String,
-        description: String,
-        stubDetails: List<Pair<String, String>>
-    ) {
-        val rootLayout = LinearLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#121212"))
-            orientation = LinearLayout.VERTICAL
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            setPadding(20.dpToPx(), 20.dpToPx(), 20.dpToPx(), 20.dpToPx())
-        }
-
-        // Шапка
-        val headerLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 0, 0, 24.dpToPx())
-            }
-        }
-
-        val btnClose = android.widget.ImageButton(this).apply {
-            setImageResource(R.drawable.ic_back)
-            setColorFilter(Color.WHITE)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(Color.parseColor("#262626"))
-            }
-            val buttonSize = 40.dpToPx()
-            val paddingSize = 10.dpToPx()
-            layoutParams = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
-                setMargins(0, 0, 16.dpToPx(), 0)
-            }
-            setPadding(paddingSize, paddingSize, paddingSize, paddingSize)
-            setupTvFocusAnimator()
-        }
-
-        val titleView = TextView(this).apply {
-            text = title
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
-        }
-
-        headerLayout.addView(btnClose)
-        headerLayout.addView(titleView)
-
-        // Описание секции
-        val descView = TextView(this).apply {
-            text = description
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
-            setTextColor(Color.parseColor("#8E8E93"))
-            setPadding(0, 0, 0, 16.dpToPx())
-        }
-
-        // Контейнер с карточками опций
-        val scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1.0f
-            )
-        }
-
-        val listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        for ((key, value) in stubDetails) {
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(16.dpToPx(), 16.dpToPx(), 16.dpToPx(), 16.dpToPx())
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 14 * resources.displayMetrics.density
-                    setColor(Color.parseColor("#1C1C1E"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, 6.dpToPx(), 0, 6.dpToPx())
-                }
-                isClickable = true
-                isFocusable = true
-                setupTvFocusAnimator()
-                setOnClickListener {
-                    Toast.makeText(this@MainActivity, "$key: $value", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            val tvKey = TextView(this).apply {
-                text = key
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
-                setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
-            }
-
-            val tvValue = TextView(this).apply {
-                text = value
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
-                setTextColor(Color.parseColor("#EEBC7A"))
-            }
-
-            card.addView(tvKey)
-            card.addView(tvValue)
-            listContainer.addView(card)
-        }
-
-        scrollView.addView(listContainer)
-        rootLayout.addView(headerLayout)
-        rootLayout.addView(descView)
-        rootLayout.addView(scrollView)
-
-        val dialog = AlertDialog.Builder(this).create()
-        btnClose.setOnClickListener { dialog.dismiss() }
-
-        dialog.show()
-        dialog.setContentView(rootLayout)
-        dialog.window?.apply {
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        }
-    }
-
-
-
-    /**
-     * Удаляет указанные поля из текста конфига для корректного сравнения
-     */
-    private fun sanitizeTomlForComparison(toml: String): String {
-        return toml.lines().filterNot { line ->
-            val trimmed = line.trim()
-            trimmed.startsWith("dns_server_list", ignoreCase = true) ||
-                    trimmed.startsWith("exclude_route_for", ignoreCase = true)
-        }.joinToString("\n").trim()
-    }
-
-    /**
-     * Извлекает значение определенного поля из исходного TOML текста (например "dns_server_list = [...]")
-     */
-    private fun extractFieldLine(toml: String, fieldPrefix: String): String? {
-        return toml.lines().find { it.trim().startsWith(fieldPrefix, ignoreCase = true) }
-    }
-
-    /**
-     * Заменяет или добавляет поле в целевой TOML контент
-     */
-    private fun mergePreservedFields(remoteToml: String, localToml: String): String {
-        var merged = remoteToml
-
-        // Список полей, которые мы сохраняем из локального конфига
-        val preservedFields = listOf("dns_server_list", "exclude_route_for")
-
-        for (field in preservedFields) {
-            val localLine = extractFieldLine(localToml, field)
-            if (localLine != null) {
-                // Если в новом конфиге есть такое поле — заменяем его на локальное
-                val remoteLine = extractFieldLine(merged, field)
-                merged = if (remoteLine != null) {
-                    merged.replace(remoteLine, localLine)
-                } else {
-                    // Если в новом конфиге его не было — добавляем в конец
-                    "$merged\n$localLine"
-                }
-            }
-        }
-        return merged
-    }
-
 
     // --- ДИАЛОГ РЕДАКТИРОВАНИЯ ОСНОВНОЙ ССЫЛКИ В SETTINGS ---
     private fun showEditSubscriptionUrlDialog(returnToSettings: Boolean = true) {
@@ -3099,8 +2934,4 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
     }
-
-
 }
-
-
