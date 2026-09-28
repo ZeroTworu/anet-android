@@ -111,7 +111,10 @@ class MainActivity : AppCompatActivity() {
     // Каждая строка хранится отдельным элементом (а не одной гигантской SpannableStringBuilder),
     // чтобы ListView мог переиспользовать (recycle) view-элементы и не перекладывать весь текст
     // заново при каждой новой строке лога — именно это и вызывало тормоза при большом логе.
-    private val logLines = ArrayDeque<CharSequence>().apply { add("> System ready...") }
+    private val logLines = ArrayDeque<CharSequence>().apply {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        add("[$time] > System ready...")
+    }
     private var activeLogAdapter: ArrayAdapter<CharSequence>? = null
     private var activeLogListView: ListView? = null
 
@@ -1392,22 +1395,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun logToConsole(msg: String) {
         runOnUiThread {
+            val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+
+            // Если в сообщении уже есть таймстемп вида [17:03:51], не дублируем его
+            val formattedMsg = if (msg.startsWith("[") && msg.length >= 10 && msg[9] == ']') {
+                msg
+            } else {
+                "[$timestamp] $msg"
+            }
+
             val color = when {
-                msg.contains("Config loaded", ignoreCase = true) ||
-                        msg.contains(
+                formattedMsg.contains("Config loaded", ignoreCase = true) ||
+                        formattedMsg.contains(
                             "dead session",
                             ignoreCase = true
                         ) -> Color.parseColor("#FF9800")
 
-                msg.contains("Connected", ignoreCase = true) -> Color.parseColor("#4CAF50")
-                msg.contains("Stopped", ignoreCase = true) ||
-                        msg.contains("Error", ignoreCase = true) ||
-                        msg.contains("Ошибка", ignoreCase = true) -> Color.parseColor("#F44336")
+                formattedMsg.contains("Connected", ignoreCase = true) -> Color.parseColor("#4CAF50")
+                formattedMsg.contains("Stopped", ignoreCase = true) ||
+                        formattedMsg.contains("Error", ignoreCase = true) ||
+                        formattedMsg.contains("Ошибка", ignoreCase = true) -> Color.parseColor("#F44336")
 
                 else -> null
             }
 
-            val line = "> $msg"
+            val line = formattedMsg
             val entry: CharSequence = if (color != null) {
                 SpannableString(line).apply {
                     setSpan(
