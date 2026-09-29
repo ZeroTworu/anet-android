@@ -293,7 +293,7 @@
             android:src="@drawable/chevron_down" />
     </LinearLayout>
 
-    <!-- Блок информации о сборке -->
+    <!-- Блок информации о сборке / Статус события -->
     <LinearLayout
         android:id="@+id/buildInfoBlock"
         android:layout_width="match_parent"
@@ -305,11 +305,11 @@
         android:padding="8dp"
         app:layout_constraintBottom_toTopOf="@+id/statsContainer"
         app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer"
-        android:layout_marginBottom="8dp"
-        tools:layout_editor_absoluteX="16dp">
+        android:layout_marginBottom="8dp">
 
-        <!-- Блок с информацией о версии (слева) -->
+        <!-- Контейнер для версий (показывается только при DISCONNECTED) -->
         <LinearLayout
+            android:id="@+id/versionInfoContainer"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -323,7 +323,7 @@
                 android:text="VERSION: v0.0.0 (32)"
                 android:textColor="@color/green"
                 android:textSize="12sp"
-                android:textStyle="bold" /> />
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/buildDetailLabel"
@@ -334,6 +334,21 @@
                 android:textColor="#888888"
                 android:textSize="8sp" />
         </LinearLayout>
+
+        <!-- Текст последнего важного события (показывается при CONNECTING / CONNECTED) -->
+        <TextView
+            android:id="@+id/tvVpnEventStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/white"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="[17:03:52] Tunnel UP" />
 
         <!-- Компактная кнопка открытия логов (справа) -->
         <Button
@@ -348,8 +363,7 @@
             android:paddingVertical="6dp"
             android:text="LOG"
             android:textColor="#fff"
-            android:textSize="11sp"
-            />
+            android:textSize="11sp" />
 
     </LinearLayout>
     <!--    Панель статистики-->
@@ -399,8 +413,7 @@
                     android:layout_height="wrap_content"
                     android:text="0ms"
                     android:textColor="#F2F3F6"
-                    android:textSize="11sp" />
-                     />
+                    android:textSize="11sp" />                     
             </LinearLayout>
 
             <!-- Download (RX) -->

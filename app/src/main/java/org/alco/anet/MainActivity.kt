@@ -107,6 +107,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var serverSelectIcon: ImageView
     private var activeErrorDialog: AlertDialog? = null
 
+    private lateinit var versionInfoContainer: LinearLayout
+    private lateinit var tvVpnEventStatus: TextView
+
+    private var lastAccountGroup: String = ""
+    private var lastAccountExpires: String = ""
+    private var lastAccountTraffic: String = ""
+    private var lastAccountSpeed: String = ""
+    private var lastAccountSessions: String = ""
+    private var lastVpnEventText: String = ""
+    private var lastVpnEventColor: Int = Color.WHITE
+
     // Буфер и управление окном логов.
     // Каждая строка хранится отдельным элементом (а не одной гигантской SpannableStringBuilder),
     // чтобы ListView мог переиспользовать (recycle) view-элементы и не перекладывать весь текст
@@ -776,6 +787,7 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            // В statusReceiver при получении "is_account_info":
             if (intent?.getBooleanExtra("is_account_info", false) == true) {
                 val billing = intent.getStringExtra("billing") ?: "—"
                 val group = intent.getStringExtra("group") ?: "—"
@@ -785,12 +797,18 @@ class MainActivity : AppCompatActivity() {
                 val limit = intent.getStringExtra("limit") ?: "—"
                 val expires = intent.getStringExtra("expires") ?: "—"
 
+                lastAccountGroup = "$billing • $group"
+                lastAccountExpires = expires
+                lastAccountTraffic = "$consumed\n/ $limit"
+                lastAccountSpeed = speed
+                lastAccountSessions = sessions
+
                 runOnUiThread {
-                    findViewById<TextView>(R.id.tvAccountGroup)?.text = "$billing • $group"
-                    findViewById<TextView>(R.id.tvAccountExpires)?.text = expires
-                    findViewById<TextView>(R.id.tvAccountTraffic)?.text = "$consumed\n/ $limit"
-                    findViewById<TextView>(R.id.tvAccountSpeed)?.text = speed
-                    findViewById<TextView>(R.id.tvAccountSessions)?.text = sessions
+                    findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
+                    findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
+                    findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
+                    findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
+                    findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
                 }
                 return
             }
@@ -826,7 +844,10 @@ class MainActivity : AppCompatActivity() {
             ) {
                 isCheckingUpdates = false
                 btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
+                btnSettings.isEnabled = currentUiState == State.DISCONNECTED
                 btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
+                btnSettings.alpha = if (btnSettings.isEnabled) 1.0f else 0.3f
+
             }
 
             status.let { msg ->
@@ -844,6 +865,26 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 logToConsole(msg)
+
+                // Если это ключевое статусное событие — выводим его в плашку:
+                if (msg.contains("Starting", ignoreCase = true) ||
+                    msg.contains("Connecting", ignoreCase = true) ||
+                    msg.contains("Phase", ignoreCase = true) ||
+                    msg.contains("Authentication successful", ignoreCase = true) ||
+                    msg.contains("Connected", ignoreCase = true) ||
+                    msg.contains("Tunnel UP", ignoreCase = true) ||
+                    msg.contains("Stopping", ignoreCase = true) ||
+                    msg.contains("Stopped", ignoreCase = true) ||
+                    msg.contains("Restoring", ignoreCase = true) ||
+                    msg.contains("Routing restored", ignoreCase = true) ||
+                    msg.contains("Cleaning up", ignoreCase = true) ||
+                    msg.contains("Error", ignoreCase = true) ||
+                    msg.contains("Failed", ignoreCase = true)
+                ) {
+                    val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    val cleanMsg = msg.replace("[Core]", "").replace("[AUTH]", "").trim()
+                    updateEventStatus("[$time] $cleanMsg")
+                }
 
                 val isAuthError = msg.contains("сессий", ignoreCase = true) ||
                         msg.contains("истекло", ignoreCase = true) ||
@@ -977,6 +1018,9 @@ class MainActivity : AppCompatActivity() {
         serverIndicator = findViewById(R.id.serverIndicator)
         serverSelectIcon = findViewById(R.id.serverSelectIcon)
 
+        versionInfoContainer = findViewById(R.id.versionInfoContainer)
+        tvVpnEventStatus = findViewById(R.id.tvVpnEventStatus)
+
         btnShowLogs.setOnClickListener {
             showLogsDialog()
         }
@@ -1020,6 +1064,39 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
+
+        // ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ПОВОРОТЕ ЭКРАНА
+        if (savedInstanceState != null) {
+            lastAccountGroup = savedInstanceState.getString("acc_group", "")
+            lastAccountExpires = savedInstanceState.getString("acc_expires", "")
+            lastAccountTraffic = savedInstanceState.getString("acc_traffic", "")
+            lastAccountSpeed = savedInstanceState.getString("acc_speed", "")
+            lastAccountSessions = savedInstanceState.getString("acc_sessions", "")
+            lastVpnEventText = savedInstanceState.getString("vpn_event_text", "")
+            lastVpnEventColor = savedInstanceState.getInt("vpn_event_color", Color.WHITE)
+            tvRtt.text = savedInstanceState.getString("stat_rtt", "0 ms")
+            tvRx.text = savedInstanceState.getString("stat_rx", "0 B/s")
+            tvTx.text = savedInstanceState.getString("stat_tx", "0 B/s")
+            tvRxm.text = savedInstanceState.getString("stat_rxm", "0 B")
+            tvTxm.text = savedInstanceState.getString("stat_txm", "0 B")
+        }
+
+        // Восстанавливаем блок аккаунта
+        if (lastAccountGroup.isNotEmpty()) {
+            findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
+            findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
+            findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
+            findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
+            findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
+        }
+
+        // Восстанавливаем статус события
+        if (lastVpnEventText.isNotEmpty()) {
+            tvVpnEventStatus.text = lastVpnEventText
+            tvVpnEventStatus.setTextColor(lastVpnEventColor)
+        }
+
+
         connectButton.setupTvFocusAnimator()
         btnCheckUpdate.setupTvFocusAnimator()
         serverSelectContainer.setupTvFocusAnimator()
@@ -1030,6 +1107,7 @@ class MainActivity : AppCompatActivity() {
 
             isCheckingUpdates = true
             btnCheckUpdate.isEnabled = false
+            btnSettings.isEnabled = false
             btnCheckUpdate.alpha = 0.3f
 
             logToConsole("Checking for system updates...")
@@ -1041,7 +1119,9 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         isCheckingUpdates = false
                         btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
+                        btnSettings.isEnabled = currentUiState == State.DISCONNECTED
                         btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
+                        btnSettings.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
                         logToConsole("Update check error: ${e.message}")
                     }
                 }
@@ -1251,7 +1331,18 @@ class MainActivity : AppCompatActivity() {
             currentUiState = state
             val controlsEnabled = state == State.DISCONNECTED
             btnCheckUpdate.isEnabled = controlsEnabled && !isCheckingUpdates
+            btnSettings.isEnabled = controlsEnabled && !isCheckingUpdates
             btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
+            btnSettings.alpha = if (btnSettings.isEnabled) 1.0f else 0.3f
+
+            // Переключение видимости блоков:
+            if (state == State.DISCONNECTED) {
+                versionInfoContainer.visibility = View.VISIBLE
+                tvVpnEventStatus.visibility = View.GONE
+            } else {
+                versionInfoContainer.visibility = View.GONE
+                tvVpnEventStatus.visibility = View.VISIBLE
+            }
 
             when (state) {
                 State.DISCONNECTED -> {
@@ -1271,8 +1362,8 @@ class MainActivity : AppCompatActivity() {
 
                     val readyColors = intArrayOf(
                         Color.parseColor("#669D29"),
-                        Color.parseColor("#3AA34B"), // ярко-зелёный
-                        Color.parseColor("#1C7C3A"), // тёмный лесной
+                        Color.parseColor("#3AA34B"),
+                        Color.parseColor("#1C7C3A"),
                         Color.parseColor("#1C7C3A"),
                         Color.parseColor("#3AA34B"),
                         Color.parseColor("#669D29")
@@ -1332,8 +1423,8 @@ class MainActivity : AppCompatActivity() {
 
                     val workingColors = intArrayOf(
                         Color.parseColor("#669D29"),
-                        Color.parseColor("#C4B12B"), // золотисто-жёлтый
-                        Color.parseColor("#E67E22"), // яркий оранжевый
+                        Color.parseColor("#C4B12B"),
+                        Color.parseColor("#E67E22"),
                         Color.parseColor("#E67E22"),
                         Color.parseColor("#C4B12B"),
                         Color.parseColor("#669D29")
@@ -2820,6 +2911,52 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
     }
 
+
+    private fun updateEventStatus(msg: String) {
+        val color = when {
+            msg.contains("Error", ignoreCase = true) ||
+                    msg.contains("Failed", ignoreCase = true) ||
+                    msg.contains("Ошибка", ignoreCase = true) ||
+                    msg.contains("Connection lost", ignoreCase = true) -> Color.parseColor("#F44336")
+
+            msg.contains("Connected", ignoreCase = true) ||
+                    msg.contains("Tunnel UP", ignoreCase = true) -> Color.parseColor("#4CAF50")
+
+            msg.contains("Stopping", ignoreCase = true) ||
+                    msg.contains("Stopped", ignoreCase = true) ||
+                    msg.contains("Cleaning up", ignoreCase = true) -> Color.parseColor("#FF9800")
+
+            else -> Color.parseColor("#EEBC7A")
+        }
+
+        lastVpnEventText = msg
+        lastVpnEventColor = color
+
+        runOnUiThread {
+            tvVpnEventStatus.text = msg
+            tvVpnEventStatus.setTextColor(color)
+        }
+    }
+
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Сохраняем данные аккаунта
+        outState.putString("acc_group", findViewById<TextView>(R.id.tvAccountGroup)?.text?.toString().orEmpty())
+        outState.putString("acc_expires", findViewById<TextView>(R.id.tvAccountExpires)?.text?.toString().orEmpty())
+        outState.putString("acc_traffic", findViewById<TextView>(R.id.tvAccountTraffic)?.text?.toString().orEmpty())
+        outState.putString("acc_speed", findViewById<TextView>(R.id.tvAccountSpeed)?.text?.toString().orEmpty())
+        outState.putString("acc_sessions", findViewById<TextView>(R.id.tvAccountSessions)?.text?.toString().orEmpty())
+        outState.putString("stat_rtt", tvRtt.text?.toString().orEmpty())
+        outState.putString("stat_rx", tvRx.text?.toString().orEmpty())
+        outState.putString("stat_tx", tvTx.text?.toString().orEmpty())
+        outState.putString("stat_rxm", tvRxm.text?.toString().orEmpty())
+        outState.putString("stat_txm", tvTxm.text?.toString().orEmpty())
+
+        // Сохраняем статус события
+        outState.putString("vpn_event_text", tvVpnEventStatus.text?.toString().orEmpty())
+        outState.putInt("vpn_event_color", tvVpnEventStatus.currentTextColor)
+    }
 
     private fun downloadAndApplyConfigFromUrl(
         initialUrl: String,
