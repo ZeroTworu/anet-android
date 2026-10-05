@@ -495,6 +495,37 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
+        // ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ПОВОРОТЕ ЭКРАНА
+        if (savedInstanceState != null) {
+            lastAccountGroup = savedInstanceState.getString("acc_group", "")
+            lastAccountExpires = savedInstanceState.getString("acc_expires", "")
+            lastAccountTraffic = savedInstanceState.getString("acc_traffic", "")
+            lastAccountSpeed = savedInstanceState.getString("acc_speed", "")
+            lastAccountSessions = savedInstanceState.getString("acc_sessions", "")
+            lastVpnEventText = savedInstanceState.getString("vpn_event_text", "")
+            lastVpnEventColor = savedInstanceState.getInt("vpn_event_color", Color.WHITE)
+            tvRtt.text = savedInstanceState.getString("stat_rtt", "0 ms")
+            tvRx.text = savedInstanceState.getString("stat_rx", "0 B/s")
+            tvTx.text = savedInstanceState.getString("stat_tx", "0 B/s")
+            tvRxm.text = savedInstanceState.getString("stat_rxm", "0 B")
+            tvTxm.text = savedInstanceState.getString("stat_txm", "0 B")
+        }
+
+        // Восстанавливаем блок аккаунта
+        if (lastAccountGroup.isNotEmpty()) {
+            findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
+            findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
+            findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
+            findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
+            findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
+        }
+
+        // Восстанавливаем статус события
+        if (lastVpnEventText.isNotEmpty()) {
+            tvVpnEventStatus.text = lastVpnEventText
+            tvVpnEventStatus.setTextColor(lastVpnEventColor)
+        }
+
         connectButton.setupTvFocusAnimator()
         btnCheckUpdate.setupTvFocusAnimator()
         serverSelectContainer.setupTvFocusAnimator()
@@ -619,7 +650,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val btnOk = Button(this).apply {
-            text = "Скачать"
+            text = "ОК"
             setTextColor(Color.parseColor("#00E676"))
             setBackgroundColor(Color.TRANSPARENT)
             setupTvFocusAnimator()
@@ -2189,6 +2220,52 @@ class MainActivity : AppCompatActivity() {
 
             val status = intent?.getStringExtra("status") ?: return
             logToConsole(status)
+
+            // Ключевые статусные события выводим в плашку
+            if (status.contains("Starting", ignoreCase = true) ||
+                status.contains("Connecting", ignoreCase = true) ||
+                status.contains("Phase", ignoreCase = true) ||
+                status.contains("Authentication successful", ignoreCase = true) ||
+                status.contains("Connected", ignoreCase = true) ||
+                status.contains("Tunnel UP", ignoreCase = true) ||
+                status.contains("Stopping", ignoreCase = true) ||
+                status.contains("Stopped", ignoreCase = true) ||
+                status.contains("Restoring", ignoreCase = true) ||
+                status.contains("Routing restored", ignoreCase = true) ||
+                status.contains("Cleaning up", ignoreCase = true) ||
+                status.contains("Error", ignoreCase = true) ||
+                status.contains("Failed", ignoreCase = true)
+            ) {
+                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                val cleanMsg = status.replace("[Core]", "").replace("[AUTH]", "").trim()
+                updateEventStatus("[$time] $cleanMsg")
+            }
+        }
+    }
+
+    private fun updateEventStatus(msg: String) {
+        val color = when {
+            msg.contains("Error", ignoreCase = true) ||
+                    msg.contains("Failed", ignoreCase = true) ||
+                    msg.contains("Ошибка", ignoreCase = true) ||
+                    msg.contains("Connection lost", ignoreCase = true) -> Color.parseColor("#F44336")
+
+            msg.contains("Connected", ignoreCase = true) ||
+                    msg.contains("Tunnel UP", ignoreCase = true) -> Color.parseColor("#4CAF50")
+
+            msg.contains("Stopping", ignoreCase = true) ||
+                    msg.contains("Stopped", ignoreCase = true) ||
+                    msg.contains("Cleaning up", ignoreCase = true) -> Color.parseColor("#FF9800")
+
+            else -> Color.parseColor("#EEBC7A")
+        }
+
+        lastVpnEventText = msg
+        lastVpnEventColor = color
+
+        runOnUiThread {
+            tvVpnEventStatus.text = msg
+            tvVpnEventStatus.setTextColor(color)
         }
     }
 
@@ -2566,6 +2643,25 @@ class MainActivity : AppCompatActivity() {
                 checkPermissionsAndStart()
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Сохраняем данные аккаунта
+        outState.putString("acc_group", findViewById<TextView>(R.id.tvAccountGroup)?.text?.toString().orEmpty())
+        outState.putString("acc_expires", findViewById<TextView>(R.id.tvAccountExpires)?.text?.toString().orEmpty())
+        outState.putString("acc_traffic", findViewById<TextView>(R.id.tvAccountTraffic)?.text?.toString().orEmpty())
+        outState.putString("acc_speed", findViewById<TextView>(R.id.tvAccountSpeed)?.text?.toString().orEmpty())
+        outState.putString("acc_sessions", findViewById<TextView>(R.id.tvAccountSessions)?.text?.toString().orEmpty())
+        outState.putString("stat_rtt", tvRtt.text?.toString().orEmpty())
+        outState.putString("stat_rx", tvRx.text?.toString().orEmpty())
+        outState.putString("stat_tx", tvTx.text?.toString().orEmpty())
+        outState.putString("stat_rxm", tvRxm.text?.toString().orEmpty())
+        outState.putString("stat_txm", tvTxm.text?.toString().orEmpty())
+
+        // Сохраняем статус события
+        outState.putString("vpn_event_text", tvVpnEventStatus.text?.toString().orEmpty())
+        outState.putInt("vpn_event_color", tvVpnEventStatus.currentTextColor)
     }
 
     override fun onDestroy() {
