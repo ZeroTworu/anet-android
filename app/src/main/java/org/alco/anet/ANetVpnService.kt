@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 class ANetVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
+
     @Volatile private var allowedAppsCache: List<String> = emptyList()
     @Volatile private var isShuttingDown = false
-
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var lastNetwork: Network? = null
@@ -44,16 +44,19 @@ class ANetVpnService : VpnService() {
         init {
             System.loadLibrary("anet_mobile")
         }
+
         @Volatile
         var isServiceRunning: Boolean = false
 
         @Volatile
         private var lastConfigCache: String? = null
+
         @Volatile
         private var lastSelectedServerCache: String? = null
 
         const val ACTION_CONNECT = "org.alco.anet.CONNECT"
         const val ACTION_STOP = "org.alco.anet.STOP"
+
         const val EXTRA_VPN_STATE = "vpn_state"
         const val EXTRA_VPN_MESSAGE = "vpn_message"
         const val EXTRA_SERVER_NAME = "server_name"
@@ -127,6 +130,7 @@ class ANetVpnService : VpnService() {
             stopVpnInternal()
             return START_NOT_STICKY
         }
+
         val selectedServer = intent?.getStringExtra("SELECTED_SERVER") ?: lastSelectedServerCache ?: ""
 
         // Сохраняем в кэш для авто-восстановления при перезапуске сервиса системой
@@ -134,13 +138,10 @@ class ANetVpnService : VpnService() {
         lastSelectedServerCache = selectedServer
 
         acquireLocks()
-
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
-
         registerNetworkCallback()
 
         Thread { connectVpn(config, selectedServer) }.start()
-
         return START_STICKY
     }
 
@@ -261,6 +262,7 @@ class ANetVpnService : VpnService() {
                     }
                 }
             }
+
             try {
                 connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
             } catch (e: Exception) {
@@ -307,9 +309,8 @@ class ANetVpnService : VpnService() {
         dnsServers: String
     ): Int {
         Log.i("ANet", "Configuring TUN...")
-
         tunGeneration.incrementAndGet()
-        closeTun()
+        val oldInterface = vpnInterface
 
         val builder = Builder()
         builder.addAddress(ip, prefix)
@@ -329,12 +330,12 @@ class ANetVpnService : VpnService() {
         } else {
             try {
                 builder.addDisallowedApplication(packageName)
-            } catch (e: Exception) { Log.e("ANet", "$e", e)}
+            } catch (e: Exception) { Log.e("ANet", "$e", e) }
         }
 
         if (dnsServers.isNotEmpty()) {
             dnsServers.split(",").forEach {
-                if (it.isNotBlank()) try { builder.addDnsServer(it.trim()) } catch(e: Exception){
+                if (it.isNotBlank()) try { builder.addDnsServer(it.trim()) } catch (e: Exception) {
                     Log.e("ANet", e.toString())
                 }
             }
@@ -350,10 +351,10 @@ class ANetVpnService : VpnService() {
 
             if (excludeRoutes.isNotEmpty()) {
                 if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
-                    Log.i("ANet", "Using Native Android 13 Exclusions")
+                    val count = excludeRoutes.split(",").filter { it.isNotBlank() }.size
+                    Log.i("ANet", "Using Native Android 13 Exclusions ($count routes)")
                     builder.addRoute("0.0.0.0", 0)
                     excludeRoutes.split(",").forEach { excludeRouteSafely(builder, it) }
-                    builder.addRoute("128.0.0.0", 1)
                 } else {
                     Log.i("ANet", "Legacy Android: Using Calculated Fallback Routes")
                     if (fallbackRoutes.isNotEmpty()) {
@@ -368,12 +369,20 @@ class ANetVpnService : VpnService() {
             }
         }
 
-        try {
-            vpnInterface = builder.establish()
-            return vpnInterface?.fd ?: -1
+        return try {
+            val newInterface = builder.establish()
+            if (oldInterface != null && oldInterface !== newInterface) {
+                try {
+                    oldInterface.close()
+                } catch (e: Exception) {
+                    Log.e("ANet", "Failed to close previous vpnInterface", e)
+                }
+            }
+            vpnInterface = newInterface
+            vpnInterface?.fd ?: -1
         } catch (e: Exception) {
             Log.e("ANet", "Establish failed", e)
-            return -1
+            -1
         }
     }
 
@@ -410,15 +419,12 @@ class ANetVpnService : VpnService() {
     fun onStatusChanged(status: String) {
         Log.d("ANet", "Status: $status")
         updateNotification(status)
-
         val intent = Intent("org.alco.anet.VPN_STATUS")
         intent.putExtra("status", status)
-
         if (status.contains("ERROR", ignoreCase = true) ||
             status.contains("[CORE AUTH]", ignoreCase = true)) {
             intent.putExtra("is_error", true)
         }
-
         intent.setPackage(packageName)
         sendBroadcast(intent)
     }
