@@ -115,9 +115,9 @@ class MainActivity : AppCompatActivity() {
     private var lastConnTitle: String = "Метеосводка: проверка связи…"
     private var lastConnSubtitle: String = "Опрашиваем ближние и дальние маяки…"
     private var lastConnGlobalOk: Int = 0
-    private var lastConnGlobalTotal: Int = 4
+    private var lastConnGlobalTotal: Int = 3
     private var lastConnDomesticOk: Int = 0
-    private var lastConnDomesticTotal: Int = 5
+    private var lastConnDomesticTotal: Int = 3
     private var useKotlinFallbackProber: Boolean = false
 
     private var isScanningQr = false
@@ -3330,6 +3330,8 @@ class MainActivity : AppCompatActivity() {
         if (!silent) {
             btnRecheckConnectivity.animate().rotationBy(360f).setDuration(450).start()
             tvConnectivityTitle.text = "Сверяем показания приборов…"
+            tvConnectivitySubtitle.text = "Опрашиваем контрольные точки маршрутизации…"
+            logToConsole("Запущена внеплановая проверка маршрутов…")
         }
         try {
             if (!useKotlinFallbackProber) {
@@ -3358,8 +3360,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun runSingleKotlinFallbackProbe() {
         Thread {
-            val domesticHosts = listOf("https://ya.ru", "https://vk.com", "https://gosuslugi.ru", "https://mail.ru", "https://www.sberbank.ru")
-            val globalHosts = listOf("https://www.google.com/generate_204", "https://cp.cloudflare.com/generate_204", "https://github.com", "https://firefox.com")
+            val domesticHosts = parseTomlStringArray(selectedConfigContent, "domestic_targets")
+                .ifEmpty { listOf("https://ya.ru", "https://vk.com", "https://www.gosuslugi.ru") }
+            val globalHosts = parseTomlStringArray(selectedConfigContent, "global_targets")
+                .ifEmpty { listOf("https://www.google.com/generate_204", "https://connectivitycheck.gstatic.com/generate_204", "https://store.steampowered.com/favicon.ico") }
             var domOk = 0
             var globOk = 0
             var bestRtt = Long.MAX_VALUE
@@ -3429,6 +3433,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class Quad(val cond: Int, val color: Int, val title: String, val subtitle: String)
+
+    private fun parseTomlStringArray(tomlContent: String?, key: String): List<String> {
+        if (tomlContent.isNullOrBlank()) return emptyList()
+        val regex = Regex("""(?m)^\s*${Regex.escape(key)}\s*=\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
+        val match = regex.find(tomlContent) ?: return emptyList()
+        val body = match.groupValues[1]
+        return Regex(""""([^"]+)"""").findAll(body)
+            .map { it.groupValues[1].trim() }
+            .filter { it.startsWith("http://") || it.startsWith("https://") }
+            .toList()
+    }
 
     private fun probeHttpHead(urlStr: String, timeoutMs: Int): Long {
         var conn: HttpURLConnection? = null

@@ -225,9 +225,9 @@ class ConnectivitySegmentsView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private var domesticOk: Int = 0
-    private var domesticTotal: Int = 5
+    private var domesticTotal: Int = 3
     private var globalOk: Int = 0
-    private var globalTotal: Int = 4
+    private var globalTotal: Int = 3
     private var pulseColorCode: Int = PulseLineView.PULSE_YELLOW
 
     private val density = resources.displayMetrics.density
