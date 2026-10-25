@@ -188,7 +188,6 @@ class MainActivity : AppCompatActivity() {
     private external fun initLogger()
     private external fun startConnectivityMonitor(config: String)
     private external fun triggerConnectivityCheck()
-    private external fun getConnectivitySnapshotJson(): String
 
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
 
@@ -3318,10 +3317,6 @@ class MainActivity : AppCompatActivity() {
         try {
             startConnectivityMonitor(selectedConfigContent ?: "")
             useKotlinFallbackProber = false
-            val snapJson = getConnectivitySnapshotJson()
-            if (snapJson.isNotBlank() && snapJson != "{}") {
-                parseAndApplySnapshotJson(snapJson)
-            }
         } catch (e: UnsatisfiedLinkError) {
             Log.w("ANet", "Native startConnectivityMonitor unavailable, using Kotlin fallback prober")
             useKotlinFallbackProber = true
@@ -3329,36 +3324,6 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("ANet", "Failed to start connectivity monitor: ${e.message}")
         }
-    }
-
-    private fun parseAndApplySnapshotJson(jsonStr: String) {
-        try {
-            val obj = JSONObject(jsonStr)
-            val cond = when (obj.optString("condition", "")) {
-                "Offline" -> 0
-                "DomesticOnly" -> 1
-                "DirectOnline" -> 2
-                "TunnelLost" -> 3
-                "TunnelOnlyNoWorld" -> 4
-                "TunnelFullOnline" -> 5
-                else -> obj.optInt("condition", lastConnCondition)
-            }
-            val color = when (obj.optString("pulse_color", "")) {
-                "Red" -> PulseLineView.PULSE_RED
-                "Yellow" -> PulseLineView.PULSE_YELLOW
-                "Green" -> PulseLineView.PULSE_GREEN
-                else -> obj.optInt("pulse_color", lastConnPulseColor)
-            }
-            val rtt = if (obj.isNull("display_rtt_ms")) -1L else obj.optLong("display_rtt_ms", -1L)
-            val vpnConn = obj.optBoolean("vpn_connected", isVpnConnected)
-            val title = obj.optString("title", lastConnTitle)
-            val subtitle = obj.optString("subtitle", lastConnSubtitle)
-            val gOk = obj.optInt("global_ok", lastConnGlobalOk)
-            val gTot = obj.optInt("global_total", lastConnGlobalTotal)
-            val dOk = obj.optInt("domestic_ok", lastConnDomesticOk)
-            val dTot = obj.optInt("domestic_total", lastConnDomesticTotal)
-            applyConnectivityState(cond, color, rtt, vpnConn, title, subtitle, gOk, gTot, dOk, dTot)
-        } catch (_: Exception) {}
     }
 
     private fun requestConnectivityRecheck(silent: Boolean) {
