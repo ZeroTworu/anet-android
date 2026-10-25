@@ -1,21 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Состояние при нажатии (цвет подсветки + цвет линии снизу) -->
+    <!-- Выделение пультом (TV D-Pad) или нажатие пальцем -->
     <item android:state_pressed="true">
         <layer-list>
-            <!-- Цвет подсветки при клике -->
-            <item><color android:color="@color/grey_light_light" /></item>
-            <!-- Сама линия-разделитель (например, полупрозрачная белая) -->
-            <item android:bottom="1dp"><shape><solid android:color="#33FFFFFF" /></shape></item>
+            <item><color android:color="#375417" /></item>
+            <item android:bottom="1dp">
+                <shape>
+                    <solid android:color="#375417" />
+                    <stroke android:width="1.5dp" android:color="#669D29" />
+                </shape>
+            </item>
         </layer-list>
     </item>
-    
+    <item android:state_focused="true">
+        <layer-list>
+            <item><color android:color="#375417" /></item>
+            <item android:bottom="1dp">
+                <shape>
+                    <solid android:color="#375417" />
+                    <stroke android:width="1.5dp" android:color="#669D29" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item android:state_selected="true">
+        <layer-list>
+            <item><color android:color="#375417" /></item>
+            <item android:bottom="1dp">
+                <shape>
+                    <solid android:color="#375417" />
+                    <stroke android:width="1.5dp" android:color="#669D29" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item android:state_activated="true">
+        <layer-list>
+            <item><color android:color="#2B3D16" /></item>
+            <item android:bottom="1dp"><shape><solid android:color="#669D29" /></shape></item>
+        </layer-list>
+    </item>
+
     <!-- Обычное состояние -->
     <item>
         <layer-list>
-            <!-- Ваш основной оранжевый фон элемента -->
             <item><color android:color="@color/grey_light" /></item>
-            <!-- Линия-разделитель снизу (например, чуть более темный оранжевый или черный оттенок) -->
             <item android:bottom="1dp"><shape><solid android:color="@color/grey" /></shape></item>
         </layer-list>
     </item>

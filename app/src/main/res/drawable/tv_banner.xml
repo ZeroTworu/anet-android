@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Тёмный графитовый фон баннера -->
+    <path
+        android:fillColor="#121318"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <!-- Декоративное мягкое свечение вокруг эмблемы -->
+    <path
+        android:fillAlpha="0.14"
+        android:fillColor="#669D29"
+        android:pathData="M96,90m-56,0a56,56 0,1 1,112 0a56,56 0,1 1,-112 0" />
+
+    <!-- Внешнее неоновое кольцо щита/туннеля -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M96,90m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0"
+        android:strokeWidth="5"
+        android:strokeColor="#669D29" />
+
+    <!-- Внутренний акцентный контур -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M96,90m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0"
+        android:strokeAlpha="0.7"
+        android:strokeWidth="2.5"
+        android:strokeColor="#EEBC7A" />
+
+    <!-- Стилизованная буква 'A' внутри эмблемы -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M96,68L79,110h8.5l3.8,-9.8h9.4l3.8,9.8h8.5L96,68zM93.8,93.2L96,87.2l2.2,6h-4.4z" />
+
+    <!-- Надпись ANET справа от эмблемы -->
+    <!-- A -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M168,68L152,112h9.5l3.2,-9.5h14.6l3.2,9.5h9.5L176,68h-8zM167.3,94.5L172,80.5l4.7,14h-9.4z" />
+    <!-- N -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M200,68v44h8.5V84.2L225,112h8.5V68H225v27.5L208.5,68H200z" />
+    <!-- E -->
+    <path
+        android:fillColor="#669D29"
+        android:pathData="M244,68v44h28v-7.8h-19.5V93.5h16.8v-7.5h-16.8V75.8H272V68h-28z" />
+    <!-- T -->
+    <path
+        android:fillColor="#EEBC7A"
+        android:pathData="M278,68v7.8h11.5V112h8.8V75.8H310V68h-32z" />
+</vector>

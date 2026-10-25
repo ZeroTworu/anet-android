@@ -2713,6 +2713,8 @@ class MainActivity : AppCompatActivity() {
 
         val listPopupWindow = ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
         listPopupWindow.anchorView = serverSelectContainer
+        listPopupWindow.isModal = true
+        listPopupWindow.inputMethodMode = ListPopupWindow.INPUT_METHOD_NOT_NEEDED
         listPopupWindow.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.popup_bg))
 
         val adapter = ArrayAdapter(this, R.layout.spinner_dropdown_item, formattedNames)
@@ -2724,6 +2726,7 @@ class MainActivity : AppCompatActivity() {
                 selectedServerName = server.id
                 serverSelectTextView.text = server.name
                 prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
+                logToConsole("Выбрана нода: ${server.name}")
             }
             listPopupWindow.dismiss()
         }
@@ -2733,8 +2736,175 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Соединение активно, выбор ноды заблокирован", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            listPopupWindow.show()
+            if (isTvDevice()) {
+                showServerSelectDialog()
+            } else {
+                listPopupWindow.show()
+                val currentIdx = availableServers.indexOfFirst { it.id == selectedServerName }.coerceAtLeast(0)
+                listPopupWindow.listView?.apply {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    itemsCanFocus = false
+                    choiceMode = ListView.CHOICE_MODE_SINGLE
+                    setItemChecked(currentIdx, true)
+                    setSelection(currentIdx)
+                    requestFocus()
+                }
+            }
         }
+    }
+
+    private fun isTvDevice(): Boolean {
+        val uiMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK
+        if (uiMode == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) return true
+        val pm = packageManager
+        return pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
+            !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+    }
+
+    private fun showServerSelectDialog() {
+        if (availableServers.isEmpty()) return
+        val prefs = getAppPrefs()
+
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20.dpToPx(), 18.dpToPx(), 20.dpToPx(), 18.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16.dpToPx().toFloat()
+                setColor(Color.parseColor("#141416"))
+                setStroke(1.dpToPx(), Color.parseColor("#2E2E32"))
+            }
+        }
+
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 12.dpToPx())
+        }
+
+        val titleView = TextView(this).apply {
+            text = "Выберите точку подключения"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+        headerLayout.addView(titleView)
+        rootLayout.addView(headerLayout)
+
+        val scrollView = android.widget.ScrollView(this).apply {
+            isFillViewport = false
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * 0.68f).toInt()
+            )
+        }
+
+        val listContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(4.dpToPx(), 4.dpToPx(), 4.dpToPx(), 4.dpToPx())
+        }
+        scrollView.addView(listContainer)
+        rootLayout.addView(scrollView)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(rootLayout)
+            .setCancelable(true)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        var selectedRowView: View? = null
+
+        for (server in availableServers) {
+            val isSelected = server.id == selectedServerName
+
+            fun buildRowBg(focused: Boolean, active: Boolean): android.graphics.drawable.GradientDrawable {
+                return android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 12.dpToPx().toFloat()
+                    when {
+                        focused -> {
+                            setColor(Color.parseColor("#375417"))
+                            setStroke(2.dpToPx(), Color.parseColor("#8BC34A"))
+                        }
+                        active -> {
+                            setColor(Color.parseColor("#233214"))
+                            setStroke(1.dpToPx(), Color.parseColor("#669D29"))
+                        }
+                        else -> {
+                            setColor(Color.parseColor("#1C1C1E"))
+                            setStroke(1.dpToPx(), Color.parseColor("#2A2A2E"))
+                        }
+                    }
+                }
+            }
+
+            val rowLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(14.dpToPx(), 13.dpToPx(), 14.dpToPx(), 13.dpToPx())
+                background = buildRowBg(focused = false, active = isSelected)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 4.dpToPx(), 0, 4.dpToPx())
+                }
+                isFocusable = true
+                isFocusableInTouchMode = true
+                isClickable = true
+                setOnFocusChangeListener { v, hasFocus ->
+                    v.background = buildRowBg(focused = hasFocus, active = isSelected)
+                    v.animate()
+                        .scaleX(if (hasFocus) 1.02f else 1.0f)
+                        .scaleY(if (hasFocus) 1.02f else 1.0f)
+                        .setDuration(120)
+                        .start()
+                }
+                setOnClickListener {
+                    selectedServerName = server.id
+                    serverSelectTextView.text = server.name
+                    prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
+                    logToConsole("Выбрана нода: ${server.name}")
+                    dialog.dismiss()
+                }
+            }
+
+            val dotView = ImageView(this).apply {
+                setImageResource(if (isSelected) R.drawable.leftchev else R.drawable.dot)
+                setColorFilter(if (isSelected) Color.parseColor("#8BC34A") else Color.parseColor("#666666"))
+                val s = if (isSelected) 18.dpToPx() else 10.dpToPx()
+                layoutParams = LinearLayout.LayoutParams(s, s).apply {
+                    setMargins(0, 0, 12.dpToPx(), 0)
+                }
+            }
+
+            val nameTv = TextView(this).apply {
+                text = server.getFormattedName()
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTypeface(null, if (isSelected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+
+            rowLayout.addView(dotView)
+            rowLayout.addView(nameTv)
+            listContainer.addView(rowLayout)
+
+            if (isSelected || selectedRowView == null) {
+                selectedRowView = rowLayout
+            }
+        }
+
+        dialog.setOnShowListener {
+            selectedRowView?.post {
+                selectedRowView?.requestFocus()
+                val top = selectedRowView?.top ?: 0
+                scrollView.smoothScrollTo(0, (top - 80.dpToPx()).coerceAtLeast(0))
+            }
+        }
+
+        dialog.show()
     }
 
     private val statusReceiver = object : BroadcastReceiver() {
