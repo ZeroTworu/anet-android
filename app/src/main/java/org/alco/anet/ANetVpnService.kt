@@ -69,6 +69,29 @@ class ANetVpnService : VpnService() {
         const val EXTRA_STATS_RTT = "stats_rtt"
         const val EXTRA_STATS_RXM = "stats_rxm"
         const val EXTRA_STATS_TXM = "stats_txm"
+        const val EXTRA_IS_CONNECTIVITY = "is_connectivity"
+        const val EXTRA_CONN_CONDITION = "conn_condition"
+        const val EXTRA_CONN_PULSE_COLOR = "conn_pulse_color"
+        const val EXTRA_CONN_RTT_MS = "conn_rtt_ms"
+        const val EXTRA_CONN_VPN_CONNECTED = "conn_vpn_connected"
+        const val EXTRA_CONN_TITLE = "conn_title"
+        const val EXTRA_CONN_SUBTITLE = "conn_subtitle"
+        const val EXTRA_CONN_GLOBAL_OK = "conn_global_ok"
+        const val EXTRA_CONN_GLOBAL_TOTAL = "conn_global_total"
+        const val EXTRA_CONN_DOMESTIC_OK = "conn_domestic_ok"
+        const val EXTRA_CONN_DOMESTIC_TOTAL = "conn_domestic_total"
+        const val EXTRA_IS_TELEMETRY = "is_telemetry"
+        const val EXTRA_TEL_RX_BPS = "tel_rx_bps"
+        const val EXTRA_TEL_TX_BPS = "tel_tx_bps"
+        const val EXTRA_TEL_TOTAL_RX = "tel_total_rx"
+        const val EXTRA_TEL_TOTAL_TX = "tel_total_tx"
+        const val EXTRA_TEL_RTT_MS = "tel_rtt_ms"
+        const val EXTRA_TEL_RX_SPEED_STR = "tel_rx_speed_str"
+        const val EXTRA_TEL_TX_SPEED_STR = "tel_tx_speed_str"
+        const val EXTRA_TEL_TOTAL_RX_STR = "tel_total_rx_str"
+        const val EXTRA_TEL_TOTAL_TX_STR = "tel_total_tx_str"
+        const val EXTRA_TEL_RX_CURVE = "tel_rx_curve"
+        const val EXTRA_TEL_TX_CURVE = "tel_tx_curve"
 
         const val STATE_DISCONNECTED = 0
         const val STATE_CONNECTING = 1
@@ -518,6 +541,69 @@ class ANetVpnService : VpnService() {
             putExtra(EXTRA_STATS_RTT, rtt)
             putExtra(EXTRA_STATS_RXM, rxm)
             putExtra(EXTRA_STATS_TXM, txm)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
+    fun onConnectivityUpdated(
+        conditionCode: Int,
+        pulseColorCode: Int,
+        rttMs: Long,
+        vpnConnected: Boolean,
+        title: String,
+        subtitle: String,
+        globalOk: Int,
+        globalTotal: Int,
+        domesticOk: Int,
+        domesticTotal: Int
+    ) {
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_IS_CONNECTIVITY, true)
+            putExtra(EXTRA_CONN_CONDITION, conditionCode)
+            putExtra(EXTRA_CONN_PULSE_COLOR, pulseColorCode)
+            putExtra(EXTRA_CONN_RTT_MS, rttMs)
+            putExtra(EXTRA_CONN_VPN_CONNECTED, vpnConnected)
+            putExtra(EXTRA_CONN_TITLE, title)
+            putExtra(EXTRA_CONN_SUBTITLE, subtitle)
+            putExtra(EXTRA_CONN_GLOBAL_OK, globalOk)
+            putExtra(EXTRA_CONN_GLOBAL_TOTAL, globalTotal)
+            putExtra(EXTRA_CONN_DOMESTIC_OK, domesticOk)
+            putExtra(EXTRA_CONN_DOMESTIC_TOTAL, domesticTotal)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
+    fun onTelemetryUpdated(
+        rxBps: Long,
+        txBps: Long,
+        totalRxBytes: Long,
+        totalTxBytes: Long,
+        rttMs: Long,
+        rxSpeedStr: String,
+        txSpeedStr: String,
+        totalRxStr: String,
+        totalTxStr: String,
+        rxCurve: FloatArray,
+        txCurve: FloatArray
+    ) {
+        renewWakeLock(force = false)
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_IS_TELEMETRY, true)
+            putExtra(EXTRA_TEL_RX_BPS, rxBps)
+            putExtra(EXTRA_TEL_TX_BPS, txBps)
+            putExtra(EXTRA_TEL_TOTAL_RX, totalRxBytes)
+            putExtra(EXTRA_TEL_TOTAL_TX, totalTxBytes)
+            putExtra(EXTRA_TEL_RTT_MS, rttMs)
+            putExtra(EXTRA_TEL_RX_SPEED_STR, rxSpeedStr)
+            putExtra(EXTRA_TEL_TX_SPEED_STR, txSpeedStr)
+            putExtra(EXTRA_TEL_TOTAL_RX_STR, totalRxStr)
+            putExtra(EXTRA_TEL_TOTAL_TX_STR, totalTxStr)
+            putExtra(EXTRA_TEL_RX_CURVE, rxCurve)
+            putExtra(EXTRA_TEL_TX_CURVE, txCurve)
             setPackage(packageName)
         }
         sendBroadcast(intent)

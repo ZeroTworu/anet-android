@@ -98,6 +98,28 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvRxm: TextView
     private lateinit var tvTxm: TextView
 
+    private lateinit var connectivityShieldCard: LinearLayout
+    private lateinit var connectivityBadgeDot: ImageView
+    private lateinit var tvConnectivityTitle: TextView
+    private lateinit var tvConnectivitySubtitle: TextView
+    private lateinit var tvConnectivityNodes: TextView
+    private lateinit var btnRecheckConnectivity: TextView
+    private lateinit var connectivitySegmentsView: ConnectivitySegmentsView
+    private lateinit var pulseLineView: PulseLineView
+    private lateinit var tvPulseTarget: TextView
+    private lateinit var telemetrySparklineView: TelemetrySparklineView
+
+    private var lastConnCondition: Int = 1
+    private var lastConnPulseColor: Int = PulseLineView.PULSE_YELLOW
+    private var lastConnRttMs: Long = -1L
+    private var lastConnTitle: String = "Метеосводка: проверка связи…"
+    private var lastConnSubtitle: String = "Опрашиваем ближние и дальние маяки…"
+    private var lastConnGlobalOk: Int = 0
+    private var lastConnGlobalTotal: Int = 4
+    private var lastConnDomesticOk: Int = 0
+    private var lastConnDomesticTotal: Int = 5
+    private var useKotlinFallbackProber: Boolean = false
+
     private var isScanningQr = false
     private lateinit var connectionStatusLabel: TextView
     private lateinit var connectButton: Button
@@ -164,6 +186,9 @@ class MainActivity : AppCompatActivity() {
     private external fun getVpnServerName(): String
     private external fun clearUiCallback()
     private external fun initLogger()
+    private external fun startConnectivityMonitor(config: String)
+    private external fun triggerConnectivityCheck()
+    private external fun getConnectivitySnapshotJson(): String
 
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
 
@@ -278,6 +303,7 @@ class MainActivity : AppCompatActivity() {
         saveConfigToPrefs(content, SERVER_CONFIG_NAME)
 
         setupServerSelector()
+        safeStartConnectivityMonitor()
         refreshConfigListRunnable?.run()
     }
 
@@ -293,6 +319,7 @@ class MainActivity : AppCompatActivity() {
         saveConfigToPrefs(content, name)
 
         setupServerSelector()
+        safeStartConnectivityMonitor()
         refreshConfigListRunnable?.run()
     }
 
@@ -585,6 +612,25 @@ class MainActivity : AppCompatActivity() {
         tvRxm = findViewById(R.id.tvRxm)
         tvTxm = findViewById(R.id.tvTxm)
 
+        connectivityShieldCard = findViewById(R.id.connectivityShieldCard)
+        connectivityBadgeDot = findViewById(R.id.connectivityBadgeDot)
+        tvConnectivityTitle = findViewById(R.id.tvConnectivityTitle)
+        tvConnectivitySubtitle = findViewById(R.id.tvConnectivitySubtitle)
+        tvConnectivityNodes = findViewById(R.id.tvConnectivityNodes)
+        btnRecheckConnectivity = findViewById(R.id.btnRecheckConnectivity)
+        connectivitySegmentsView = findViewById(R.id.connectivitySegmentsView)
+        pulseLineView = findViewById(R.id.pulseLineView)
+        tvPulseTarget = findViewById(R.id.tvPulseTarget)
+        telemetrySparklineView = findViewById(R.id.telemetrySparklineView)
+
+        connectivityShieldCard.setupTvFocusAnimator()
+        connectivityShieldCard.setOnClickListener {
+            requestConnectivityRecheck(silent = false)
+        }
+        btnRecheckConnectivity.setOnClickListener {
+            requestConnectivityRecheck(silent = false)
+        }
+
         connectionStatusLabel = findViewById(R.id.connectionStatus)
         connectButton = findViewById(R.id.connect)
         spinner = findViewById(R.id.connectSpinner)
@@ -662,12 +708,35 @@ class MainActivity : AppCompatActivity() {
             lastAccountSessions = savedInstanceState.getString("acc_sessions", "")
             lastVpnEventText = savedInstanceState.getString("vpn_event_text", "")
             lastVpnEventColor = savedInstanceState.getInt("vpn_event_color", Color.WHITE)
-            tvRtt.text = savedInstanceState.getString("stat_rtt", "0 ms")
+            tvRtt.text = savedInstanceState.getString("stat_rtt", "— мс")
             tvRx.text = savedInstanceState.getString("stat_rx", "0 B/s")
             tvTx.text = savedInstanceState.getString("stat_tx", "0 B/s")
             tvRxm.text = savedInstanceState.getString("stat_rxm", "0 B")
             tvTxm.text = savedInstanceState.getString("stat_txm", "0 B")
+
+            lastConnCondition = savedInstanceState.getInt("conn_condition", lastConnCondition)
+            lastConnPulseColor = savedInstanceState.getInt("conn_pulse_color", lastConnPulseColor)
+            lastConnRttMs = savedInstanceState.getLong("conn_rtt_ms", lastConnRttMs)
+            lastConnTitle = savedInstanceState.getString("conn_title", lastConnTitle)
+            lastConnSubtitle = savedInstanceState.getString("conn_subtitle", lastConnSubtitle)
+            lastConnGlobalOk = savedInstanceState.getInt("conn_glob_ok", lastConnGlobalOk)
+            lastConnGlobalTotal = savedInstanceState.getInt("conn_glob_total", lastConnGlobalTotal)
+            lastConnDomesticOk = savedInstanceState.getInt("conn_dom_ok", lastConnDomesticOk)
+            lastConnDomesticTotal = savedInstanceState.getInt("conn_dom_total", lastConnDomesticTotal)
         }
+        applyConnectivityState(
+            conditionCode = lastConnCondition,
+            pulseColorCode = lastConnPulseColor,
+            rttMs = lastConnRttMs,
+            vpnConnected = isVpnConnected,
+            title = lastConnTitle,
+            subtitle = lastConnSubtitle,
+            globalOk = lastConnGlobalOk,
+            globalTotal = lastConnGlobalTotal,
+            domesticOk = lastConnDomesticOk,
+            domesticTotal = lastConnDomesticTotal
+        )
+        safeStartConnectivityMonitor()
 
         if (lastAccountGroup.isNotEmpty()) {
             findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
@@ -1295,6 +1364,7 @@ class MainActivity : AppCompatActivity() {
                     saveConfigToPrefs(item.content, item.name)
                     prefs.edit().putString("active_config_id", item.id).apply()
                     setupServerSelector()
+                    safeStartConnectivityMonitor()
                     logToConsole("Выбрана конфигурация: ${item.name}")
                     populateList()
                 }
@@ -2695,6 +2765,39 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
+            if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_CONNECTIVITY, false) == true) {
+                applyConnectivityState(
+                    conditionCode = intent.getIntExtra(ANetVpnService.EXTRA_CONN_CONDITION, 1),
+                    pulseColorCode = intent.getIntExtra(ANetVpnService.EXTRA_CONN_PULSE_COLOR, PulseLineView.PULSE_YELLOW),
+                    rttMs = intent.getLongExtra(ANetVpnService.EXTRA_CONN_RTT_MS, -1L),
+                    vpnConnected = intent.getBooleanExtra(ANetVpnService.EXTRA_CONN_VPN_CONNECTED, isVpnConnected),
+                    title = intent.getStringExtra(ANetVpnService.EXTRA_CONN_TITLE).orEmpty(),
+                    subtitle = intent.getStringExtra(ANetVpnService.EXTRA_CONN_SUBTITLE).orEmpty(),
+                    globalOk = intent.getIntExtra(ANetVpnService.EXTRA_CONN_GLOBAL_OK, 0),
+                    globalTotal = intent.getIntExtra(ANetVpnService.EXTRA_CONN_GLOBAL_TOTAL, 4),
+                    domesticOk = intent.getIntExtra(ANetVpnService.EXTRA_CONN_DOMESTIC_OK, 0),
+                    domesticTotal = intent.getIntExtra(ANetVpnService.EXTRA_CONN_DOMESTIC_TOTAL, 5)
+                )
+                return
+            }
+
+            if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_TELEMETRY, false) == true) {
+                applyTelemetryState(
+                    rxBps = intent.getLongExtra(ANetVpnService.EXTRA_TEL_RX_BPS, 0L),
+                    txBps = intent.getLongExtra(ANetVpnService.EXTRA_TEL_TX_BPS, 0L),
+                    totalRxBytes = intent.getLongExtra(ANetVpnService.EXTRA_TEL_TOTAL_RX, 0L),
+                    totalTxBytes = intent.getLongExtra(ANetVpnService.EXTRA_TEL_TOTAL_TX, 0L),
+                    rttMs = intent.getLongExtra(ANetVpnService.EXTRA_TEL_RTT_MS, -1L),
+                    rxSpeedStr = intent.getStringExtra(ANetVpnService.EXTRA_TEL_RX_SPEED_STR).orEmpty(),
+                    txSpeedStr = intent.getStringExtra(ANetVpnService.EXTRA_TEL_TX_SPEED_STR).orEmpty(),
+                    totalRxStr = intent.getStringExtra(ANetVpnService.EXTRA_TEL_TOTAL_RX_STR).orEmpty(),
+                    totalTxStr = intent.getStringExtra(ANetVpnService.EXTRA_TEL_TOTAL_TX_STR).orEmpty(),
+                    rxCurve = intent.getFloatArrayExtra(ANetVpnService.EXTRA_TEL_RX_CURVE) ?: FloatArray(0),
+                    txCurve = intent.getFloatArrayExtra(ANetVpnService.EXTRA_TEL_TX_CURVE) ?: FloatArray(0)
+                )
+                return
+            }
+
             if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_STATS, false) == true) {
                 val rx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_RX).orEmpty()
                 val tx = intent.getStringExtra(ANetVpnService.EXTRA_STATS_TX).orEmpty()
@@ -2829,15 +2932,23 @@ class MainActivity : AppCompatActivity() {
             when (state) {
                 State.DISCONNECTED -> {
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
+                    val wasConnected = isVpnConnected
                     isVpnConnected = false
                     spinner.visibility = View.INVISIBLE
                     spinner.clearAnimation()
 
-                    tvRtt.text = "0 ms"
+                    tvPulseTarget.text = "Сеть"
+                    if (lastConnRttMs <= 0L) {
+                        tvRtt.text = "— мс"
+                    }
                     tvRx.text = "0 B/s"
                     tvTx.text = "0 B/s"
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
+                    telemetrySparklineView.clearGraph()
+                    if (wasConnected) {
+                        requestConnectivityRecheck(silent = true)
+                    }
 
                     connectButton.text = "CONNECT"
                     connectButton.isEnabled = true
@@ -2915,7 +3026,13 @@ class MainActivity : AppCompatActivity() {
 
                 State.CONNECTED -> {
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
+                    val wasDisconnected = !isVpnConnected
                     isVpnConnected = true
+                    val activeNodeLabel = serverSelectTextView.text?.toString()?.takeIf { it.isNotBlank() } ?: "Туннель"
+                    tvPulseTarget.text = activeNodeLabel
+                    if (wasDisconnected) {
+                        requestConnectivityRecheck(silent = true)
+                    }
                     spinner.visibility = View.INVISIBLE
                     spinner.clearAnimation()
 
@@ -3005,6 +3122,25 @@ class MainActivity : AppCompatActivity() {
         return if (speedStr.isNotBlank()) speedStr else "0 B/s"
     }
 
+    private fun parseRateToBps(raw: String): Double {
+        val clean = raw.trim()
+        val numberRegex = Regex("([0-9]+(?:\\.[0-9]+)?)")
+        val match = numberRegex.find(clean) ?: return 0.0
+        val value = match.groupValues[1].toDoubleOrNull() ?: return 0.0
+        val upper = clean.uppercase(Locale.US)
+        return when {
+            upper.contains("GIB") || upper.contains("GB") -> value * 1024.0 * 1024.0 * 1024.0
+            upper.contains("MIB") || upper.contains("MB") -> value * 1024.0 * 1024.0
+            upper.contains("KIB") || upper.contains("KB") -> value * 1024.0
+            else -> value
+        }
+    }
+
+    private fun parseRttStringMs(rtt: String): Long {
+        val digits = rtt.filter { it.isDigit() }
+        return digits.toLongOrNull() ?: -1L
+    }
+
     fun updateTrafficStats(
         rxTotal: String,
         txTotal: String,
@@ -3014,13 +3150,339 @@ class MainActivity : AppCompatActivity() {
     ) {
         val rxSpeed = formatSpeed(rxSpeedRaw)
         val txSpeed = formatSpeed(txSpeedRaw)
+        val parsedRtt = parseRttStringMs(rtt)
+        val rxBps = parseRateToBps(rxSpeedRaw)
+        val txBps = parseRateToBps(txSpeedRaw)
 
         runOnUiThread {
-            tvRtt.text = if (rtt.isNotBlank()) rtt else "0 ms"
+            if (parsedRtt > 0L) {
+                lastConnRttMs = parsedRtt
+                tvRtt.text = "$parsedRtt мс"
+                pulseLineView.updateState(lastConnPulseColor, parsedRtt)
+            } else if (rtt.isNotBlank() && lastConnRttMs <= 0L) {
+                tvRtt.text = rtt.replace("ms", " мс")
+            }
             tvRx.text = rxSpeed
             tvTx.text = txSpeed
             tvRxm.text = if (rxTotal.isNotBlank()) rxTotal else "0 B"
             tvTxm.text = if (txTotal.isNotBlank()) txTotal else "0 B"
+            telemetrySparklineView.pushFallbackSpeedSample(rxBps, txBps)
+        }
+    }
+
+    @Keep
+    fun onConnectivityUpdated(
+        conditionCode: Int,
+        pulseColorCode: Int,
+        rttMs: Long,
+        vpnConnected: Boolean,
+        title: String,
+        subtitle: String,
+        globalOk: Int,
+        globalTotal: Int,
+        domesticOk: Int,
+        domesticTotal: Int
+    ) {
+        applyConnectivityState(
+            conditionCode = conditionCode,
+            pulseColorCode = pulseColorCode,
+            rttMs = rttMs,
+            vpnConnected = vpnConnected,
+            title = title,
+            subtitle = subtitle,
+            globalOk = globalOk,
+            globalTotal = globalTotal,
+            domesticOk = domesticOk,
+            domesticTotal = domesticTotal
+        )
+    }
+
+    @Keep
+    fun onTelemetryUpdated(
+        rxBps: Long,
+        txBps: Long,
+        totalRxBytes: Long,
+        totalTxBytes: Long,
+        rttMs: Long,
+        rxSpeedStr: String,
+        txSpeedStr: String,
+        totalRxStr: String,
+        totalTxStr: String,
+        rxCurve: FloatArray,
+        txCurve: FloatArray
+    ) {
+        applyTelemetryState(
+            rxBps = rxBps,
+            txBps = txBps,
+            totalRxBytes = totalRxBytes,
+            totalTxBytes = totalTxBytes,
+            rttMs = rttMs,
+            rxSpeedStr = rxSpeedStr,
+            txSpeedStr = txSpeedStr,
+            totalRxStr = totalRxStr,
+            totalTxStr = totalTxStr,
+            rxCurve = rxCurve,
+            txCurve = txCurve
+        )
+    }
+
+    private fun applyConnectivityState(
+        conditionCode: Int,
+        pulseColorCode: Int,
+        rttMs: Long,
+        vpnConnected: Boolean,
+        title: String,
+        subtitle: String,
+        globalOk: Int,
+        globalTotal: Int,
+        domesticOk: Int,
+        domesticTotal: Int
+    ) {
+        lastConnCondition = conditionCode
+        lastConnPulseColor = pulseColorCode
+        if (rttMs > 0L || !isVpnConnected) {
+            lastConnRttMs = rttMs
+        }
+        if (title.isNotBlank()) lastConnTitle = title
+        if (subtitle.isNotBlank()) lastConnSubtitle = subtitle
+        lastConnGlobalOk = globalOk
+        lastConnGlobalTotal = globalTotal.coerceAtLeast(1)
+        lastConnDomesticOk = domesticOk
+        lastConnDomesticTotal = domesticTotal.coerceAtLeast(1)
+
+        runOnUiThread {
+            val activeColor = when (pulseColorCode) {
+                PulseLineView.PULSE_RED -> PulseLineView.COLOR_RED
+                PulseLineView.PULSE_YELLOW -> PulseLineView.COLOR_YELLOW
+                else -> PulseLineView.COLOR_GREEN
+            }
+            connectivityBadgeDot.imageTintList = ColorStateList.valueOf(activeColor)
+            tvConnectivityTitle.text = lastConnTitle
+            tvConnectivitySubtitle.text = lastConnSubtitle
+            tvConnectivityNodes.text = "РФ $domesticOk/${lastConnDomesticTotal} • Мир $globalOk/${lastConnGlobalTotal}"
+            connectivitySegmentsView.setProbes(
+                domOk = domesticOk,
+                domTotal = lastConnDomesticTotal,
+                globOk = globalOk,
+                globTotal = lastConnGlobalTotal,
+                colorCode = pulseColorCode
+            )
+
+            val displayRtt = if (rttMs > 0L) rttMs else lastConnRttMs
+            pulseLineView.updateState(pulseColorCode, displayRtt)
+            tvRtt.setTextColor(activeColor)
+            tvRtt.text = if (displayRtt > 0L) "$displayRtt мс" else "— мс"
+
+            tvPulseTarget.text = if (isVpnConnected || vpnConnected) {
+                serverSelectTextView.text?.toString()?.takeIf { it.isNotBlank() } ?: "Туннель"
+            } else {
+                "Сеть"
+            }
+        }
+    }
+
+    private fun applyTelemetryState(
+        rxBps: Long,
+        txBps: Long,
+        totalRxBytes: Long,
+        totalTxBytes: Long,
+        rttMs: Long,
+        rxSpeedStr: String,
+        txSpeedStr: String,
+        totalRxStr: String,
+        totalTxStr: String,
+        rxCurve: FloatArray,
+        txCurve: FloatArray
+    ) {
+        runOnUiThread {
+            if (rxSpeedStr.isNotBlank()) tvRx.text = rxSpeedStr
+            if (txSpeedStr.isNotBlank()) tvTx.text = txSpeedStr
+            if (totalRxStr.isNotBlank()) tvRxm.text = totalRxStr
+            if (totalTxStr.isNotBlank()) tvTxm.text = totalTxStr
+
+            if (rttMs > 0L) {
+                lastConnRttMs = rttMs
+                tvRtt.text = "$rttMs мс"
+                pulseLineView.updateState(lastConnPulseColor, rttMs)
+            }
+
+            if (rxCurve.isNotEmpty() || txCurve.isNotEmpty()) {
+                telemetrySparklineView.setCurves(rxCurve, txCurve)
+            } else {
+                telemetrySparklineView.pushFallbackSpeedSample(rxBps.toDouble(), txBps.toDouble())
+            }
+        }
+    }
+
+    private fun safeStartConnectivityMonitor() {
+        try {
+            startConnectivityMonitor(selectedConfigContent ?: "")
+            useKotlinFallbackProber = false
+            val snapJson = getConnectivitySnapshotJson()
+            if (snapJson.isNotBlank() && snapJson != "{}") {
+                parseAndApplySnapshotJson(snapJson)
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w("ANet", "Native startConnectivityMonitor unavailable, using Kotlin fallback prober")
+            useKotlinFallbackProber = true
+            startKotlinFallbackProber()
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to start connectivity monitor: ${e.message}")
+        }
+    }
+
+    private fun parseAndApplySnapshotJson(jsonStr: String) {
+        try {
+            val obj = JSONObject(jsonStr)
+            val cond = when (obj.optString("condition", "")) {
+                "Offline" -> 0
+                "DomesticOnly" -> 1
+                "DirectOnline" -> 2
+                "TunnelLost" -> 3
+                "TunnelOnlyNoWorld" -> 4
+                "TunnelFullOnline" -> 5
+                else -> obj.optInt("condition", lastConnCondition)
+            }
+            val color = when (obj.optString("pulse_color", "")) {
+                "Red" -> PulseLineView.PULSE_RED
+                "Yellow" -> PulseLineView.PULSE_YELLOW
+                "Green" -> PulseLineView.PULSE_GREEN
+                else -> obj.optInt("pulse_color", lastConnPulseColor)
+            }
+            val rtt = if (obj.isNull("display_rtt_ms")) -1L else obj.optLong("display_rtt_ms", -1L)
+            val vpnConn = obj.optBoolean("vpn_connected", isVpnConnected)
+            val title = obj.optString("title", lastConnTitle)
+            val subtitle = obj.optString("subtitle", lastConnSubtitle)
+            val gOk = obj.optInt("global_ok", lastConnGlobalOk)
+            val gTot = obj.optInt("global_total", lastConnGlobalTotal)
+            val dOk = obj.optInt("domestic_ok", lastConnDomesticOk)
+            val dTot = obj.optInt("domestic_total", lastConnDomesticTotal)
+            applyConnectivityState(cond, color, rtt, vpnConn, title, subtitle, gOk, gTot, dOk, dTot)
+        } catch (_: Exception) {}
+    }
+
+    private fun requestConnectivityRecheck(silent: Boolean) {
+        if (!silent) {
+            btnRecheckConnectivity.animate().rotationBy(360f).setDuration(450).start()
+            tvConnectivityTitle.text = "Сверяем показания приборов…"
+        }
+        try {
+            if (!useKotlinFallbackProber) {
+                triggerConnectivityCheck()
+            } else {
+                runSingleKotlinFallbackProbe()
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            useKotlinFallbackProber = true
+            runSingleKotlinFallbackProbe()
+        }
+    }
+
+    private val fallbackProbeRunnable = object : Runnable {
+        override fun run() {
+            if (!useKotlinFallbackProber || isFinishing) return
+            runSingleKotlinFallbackProbe()
+            mainHandler.postDelayed(this, 4000L)
+        }
+    }
+
+    private fun startKotlinFallbackProber() {
+        mainHandler.removeCallbacks(fallbackProbeRunnable)
+        mainHandler.post(fallbackProbeRunnable)
+    }
+
+    private fun runSingleKotlinFallbackProbe() {
+        Thread {
+            val domesticHosts = listOf("https://ya.ru", "https://vk.com", "https://gosuslugi.ru", "https://mail.ru", "https://www.sberbank.ru")
+            val globalHosts = listOf("https://www.google.com/generate_204", "https://cp.cloudflare.com/generate_204", "https://github.com", "https://firefox.com")
+            var domOk = 0
+            var globOk = 0
+            var bestRtt = Long.MAX_VALUE
+
+            for (urlStr in domesticHosts) {
+                val rtt = probeHttpHead(urlStr, 2200)
+                if (rtt > 0L) {
+                    domOk++
+                    if (rtt < bestRtt) bestRtt = rtt
+                }
+            }
+            for (urlStr in globalHosts) {
+                val rtt = probeHttpHead(urlStr, 2200)
+                if (rtt > 0L) {
+                    globOk++
+                    if (rtt < bestRtt) bestRtt = rtt
+                }
+            }
+
+            val rttMs = if (bestRtt != Long.MAX_VALUE) bestRtt else lastConnRttMs
+            val vpnOn = isVpnConnected
+            val (cond, color, title, subtitle) = when {
+                !vpnOn && domOk == 0 && globOk == 0 -> Quad(
+                    0, PulseLineView.PULSE_RED,
+                    "Полный штиль",
+                    "Ни свои, ни чужие берега не отвечают. Проверьте Wi-Fi, баланс или антенну."
+                )
+                !vpnOn && domOk > 0 && globOk == 0 -> Quad(
+                    1, PulseLineView.PULSE_YELLOW,
+                    "Метеосводка: локальная облачность",
+                    "Домашние гавани открыты, дальние берега в тумане. Включите VPN для улучшения погоды."
+                )
+                !vpnOn -> Quad(
+                    2, PulseLineView.PULSE_GREEN,
+                    "Погода лётная",
+                    "Основной интернет работает штатно. Туннель нужен только для особых маршрутов."
+                )
+                vpnOn && domOk == 0 && globOk == 0 -> Quad(
+                    3, PulseLineView.PULSE_RED,
+                    "Потеряна связь с бортом",
+                    "Туннель поднят, но эхо до сервера не доходит. Попробуйте сменить узел."
+                )
+                vpnOn && globOk == 0 -> Quad(
+                    4, PulseLineView.PULSE_YELLOW,
+                    "Туннель в тупике",
+                    "Связь с узлом есть, но внешний мир из этой точки не отвечает. Смените локацию."
+                )
+                else -> Quad(
+                    5, PulseLineView.PULSE_GREEN,
+                    "Полный вперёд",
+                    "Туннель стабилен, дальние маршруты открыты и работают без помех."
+                )
+            }
+            applyConnectivityState(
+                conditionCode = cond,
+                pulseColorCode = color,
+                rttMs = rttMs,
+                vpnConnected = vpnOn,
+                title = title,
+                subtitle = subtitle,
+                globalOk = globOk,
+                globalTotal = globalHosts.size,
+                domesticOk = domOk,
+                domesticTotal = domesticHosts.size
+            )
+        }.start()
+    }
+
+    private data class Quad(val cond: Int, val color: Int, val title: String, val subtitle: String)
+
+    private fun probeHttpHead(urlStr: String, timeoutMs: Int): Long {
+        var conn: HttpURLConnection? = null
+        return try {
+            val start = System.currentTimeMillis()
+            conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
+                requestMethod = "HEAD"
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", "Mozilla/5.0 ANet-ConnectivityCheck")
+            }
+            val code = conn.responseCode
+            val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+            if (code in 100..599) elapsed else -1L
+        } catch (_: Exception) {
+            -1L
+        } finally {
+            conn?.disconnect()
         }
     }
 
@@ -3152,6 +3614,15 @@ class MainActivity : AppCompatActivity() {
         outState.putString("stat_tx", tvTx.text?.toString().orEmpty())
         outState.putString("stat_rxm", tvRxm.text?.toString().orEmpty())
         outState.putString("stat_txm", tvTxm.text?.toString().orEmpty())
+        outState.putInt("conn_condition", lastConnCondition)
+        outState.putInt("conn_pulse_color", lastConnPulseColor)
+        outState.putLong("conn_rtt_ms", lastConnRttMs)
+        outState.putString("conn_title", lastConnTitle)
+        outState.putString("conn_subtitle", lastConnSubtitle)
+        outState.putInt("conn_glob_ok", lastConnGlobalOk)
+        outState.putInt("conn_glob_total", lastConnGlobalTotal)
+        outState.putInt("conn_dom_ok", lastConnDomesticOk)
+        outState.putInt("conn_dom_total", lastConnDomesticTotal)
 
         outState.putString("vpn_event_text", tvVpnEventStatus.text?.toString().orEmpty())
         outState.putInt("vpn_event_color", tvVpnEventStatus.currentTextColor)
@@ -3159,6 +3630,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(connectTimeoutRunnable)
+        mainHandler.removeCallbacks(fallbackProbeRunnable)
         unregisterReceiver(statusReceiver)
         clearUiCallback()
         super.onDestroy()
@@ -3166,6 +3638,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        safeStartConnectivityMonitor()
         val stateCode = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
         handleVpnState(stateCode, "", getVpnServerName())
 

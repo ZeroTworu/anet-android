@@ -19,3 +19,20 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Keep JNI callbacks and custom telemetry views
+-keepclassmembers class org.alco.anet.MainActivity {
+    public void onConnectivityUpdated(int, int, long, boolean, java.lang.String, java.lang.String, int, int, int, int);
+    public void onTelemetryUpdated(long, long, long, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, float[], float[]);
+    public void onStatusChanged(java.lang.String);
+}
+-keepclassmembers class org.alco.anet.ANetVpnService {
+    public void onConnectivityUpdated(int, int, long, boolean, java.lang.String, java.lang.String, int, int, int, int);
+    public void onTelemetryUpdated(long, long, long, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, float[], float[]);
+    public void onStatusChanged(java.lang.String);
+    public void onVpnStateChanged(int, java.lang.String, java.lang.String);
+    public void onAccountInfo(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+    public void onTrafficStats(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+}
+-keep class org.alco.anet.PulseLineView { *; }
+-keep class org.alco.anet.ConnectivitySegmentsView { *; }
+-keep class org.alco.anet.TelemetrySparklineView { *; }

@@ -18,7 +18,6 @@
 
     <!-- ==================================================================== -->
     <!-- ЛЕВАЯ КОЛОНКА: Логотип/Название, Кнопка CONNECT, Выбор Сервера       -->
-    <!-- Элементы распределены равномерно по вертикали (Chain spread)         -->
     <!-- ==================================================================== -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/leftSideContainer"
@@ -31,7 +30,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <!-- 1. Логотип и Название приложения в самом верху левой колонки -->
+        <!-- 1. Логотип и Название приложения -->
         <LinearLayout
             android:id="@+id/leftHeaderBrand"
             android:layout_width="wrap_content"
@@ -61,7 +60,7 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- 2. Главная кнопка и спиннер подключения (По центру левой колонки) -->
+        <!-- 2. Главная кнопка и спиннер подключения -->
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/buttonAndSpinnerLayout"
             android:layout_width="wrap_content"
@@ -71,7 +70,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/leftHeaderBrand">
 
-            <!-- Вращающийся спиннер -->
             <ImageView
                 android:id="@+id/connectSpinner"
                 android:layout_width="200dp"
@@ -83,7 +81,6 @@
                 app:layout_constraintStart_toStartOf="@+id/connect"
                 app:layout_constraintTop_toTopOf="@+id/connect" />
 
-            <!-- Главная кнопка CONNECT / DISCONNECT / STOP -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/connect"
                 android:layout_width="180dp"
@@ -104,7 +101,6 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="parent" />
 
-            <!-- Статус текстом под кнопкой -->
             <TextView
                 android:id="@+id/connectionStatus"
                 android:layout_width="wrap_content"
@@ -120,10 +116,9 @@
                 app:layout_constraintStart_toStartOf="@+id/connect"
                 app:layout_constraintTop_toTopOf="@+id/connect"
                 app:layout_constraintVertical_bias="0.68" />
-
         </androidx.constraintlayout.widget.ConstraintLayout>
 
-        <!-- 3. Выпадающий список выбора ноды (Внизу левой колонки) -->
+        <!-- 3. Выпадающий список выбора ноды -->
         <LinearLayout
             android:id="@+id/serverSelectContainer"
             android:layout_width="match_parent"
@@ -170,30 +165,29 @@
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <!-- ==================================================================== -->
-    <!-- ПРАВАЯ КОЛОНКА: Кнопки шапки, Тариф, Статистика, Версия / Логи       -->
-    <!-- Элементы распределены равномерно по вертикали (Chain spread)         -->
+    <!-- ПРАВАЯ КОЛОНКА: Кнопки шапки, Тариф, Диагностика/Статистика, Версия  -->
     <!-- ==================================================================== -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/rightSideContainer"
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:paddingTop="12dp"
+        android:paddingTop="8dp"
         android:paddingEnd="16dp"
         android:paddingStart="8dp"
-        android:paddingBottom="12dp"
+        android:paddingBottom="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@+id/guidelineCenter"
         app:layout_constraintTop_toTopOf="parent">
 
-        <!-- 1. Панель действий в шапке (Кнопки Update и Settings) -->
+        <!-- 1. Панель действий в шапке -->
         <LinearLayout
             android:id="@+id/header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingBottom="4dp"
+            android:paddingBottom="2dp"
             app:layout_constraintBottom_toTopOf="@+id/accountInfoContainer"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -203,7 +197,7 @@
             <Button
                 android:id="@+id/btnCheckUpdate"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="38dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="6dp"
                 android:background="@android:color/transparent"
@@ -215,13 +209,13 @@
                 app:icon="@drawable/update"
                 app:iconGravity="textStart"
                 app:iconPadding="@dimen/icon_padding"
-                app:iconSize="20dp"
+                app:iconSize="18dp"
                 app:iconTint="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnSettings"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="38dp"
                 android:layout_weight="1"
                 android:background="@android:color/transparent"
                 android:clickable="true"
@@ -235,7 +229,7 @@
                 app:icon="@drawable/ic_settings"
                 app:iconGravity="textStart"
                 app:iconPadding="@dimen/icon_padding"
-                app:iconSize="22dp"
+                app:iconSize="20dp"
                 app:iconTint="#FFFFFF" />
         </LinearLayout>
 
@@ -246,14 +240,13 @@
             android:layout_height="wrap_content"
             android:background="@drawable/linear_radius"
             android:orientation="vertical"
-            android:padding="10dp"
+            android:padding="8dp"
             android:visibility="visible"
             app:layout_constraintBottom_toTopOf="@+id/statsContainer"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/header">
 
-            <!-- Верхний ряд: Группа и Экспайр -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -266,7 +259,7 @@
                     android:layout_weight="1"
                     android:text="Группа"
                     android:textColor="#EEBC7A"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -275,14 +268,13 @@
                     android:layout_height="wrap_content"
                     android:text="Бессрочно"
                     android:textColor="@color/green"
-                    android:textSize="12sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
-            <!-- Нижний ряд: 3 колонки (Трафик, Скорость, Сессии) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="4dp"
                 android:baselineAligned="false"
                 android:orientation="horizontal"
                 android:weightSum="3">
@@ -304,9 +296,9 @@
                         android:id="@+id/tvAccountTraffic"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="—\n/ —"
+                        android:text="— / —"
                         android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
+                        android:textSize="10sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -328,7 +320,7 @@
                         android:layout_height="wrap_content"
                         android:text="—"
                         android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
+                        android:textSize="10sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -350,173 +342,286 @@
                         android:layout_height="wrap_content"
                         android:text="—"
                         android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
+                        android:textSize="10sp" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 
-        <!-- 3. Панель статистики сети -->
+        <!-- 3. Панель диагностики связности, линейного пульса и телеметрии скорости -->
         <LinearLayout
             android:id="@+id/statsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/linear_radius"
             android:orientation="vertical"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="4dp"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="7dp"
             app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/accountInfoContainer">
 
-            <!-- Верхний ряд: RTT, Download, Upload -->
+            <!-- Щит состояния сети -->
             <LinearLayout
+                android:id="@+id/connectivityShieldCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:baselineAligned="false"
-                android:orientation="horizontal"
-                android:weightSum="3">
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical">
 
-                <!-- RTT -->
                 <LinearLayout
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_margin="3dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:id="@+id/connectivityBadgeDot"
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:src="@drawable/dot"
+                        app:tint="#FFC107" />
 
                     <TextView
+                        android:id="@+id/tvConnectivityTitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="Метеосводка: проверка связи…"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvConnectivityNodes"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:letterSpacing="0.05"
-                        android:text="RTT"
-                        android:textColor="#888888"
+                        android:layout_marginStart="6dp"
+                        android:fontFamily="monospace"
+                        android:text="РФ — • Мир —"
+                        android:textColor="#9E9E9E"
                         android:textSize="8sp" />
 
                     <TextView
-                        android:id="@+id/tvRtt"
+                        android:id="@+id/btnRecheckConnectivity"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="0 ms"
-                        android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
+                        android:layout_marginStart="6dp"
+                        android:paddingHorizontal="4dp"
+                        android:text="↻"
+                        android:textColor="#EEBC7A"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
-                <!-- Download (RX) -->
-                <LinearLayout
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/tvConnectivitySubtitle"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_margin="3dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Опрашиваем ближние и дальние маяки…"
+                    android:textColor="#AAAAAA"
+                    android:textSize="9sp" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:letterSpacing="0.05"
-                        android:text="↓ DOWNLOAD"
-                        android:textColor="#888888"
-                        android:textSize="8sp" />
-
-                    <TextView
-                        android:id="@+id/tvRx"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0 B/s"
-                        android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
-                </LinearLayout>
-
-                <!-- Upload (TX) -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_margin="3dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:letterSpacing="0.05"
-                        android:text="↑ UPLOAD"
-                        android:textColor="#888888"
-                        android:textSize="8sp" />
-
-                    <TextView
-                        android:id="@+id/tvTx"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0 B/s"
-                        android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
-                </LinearLayout>
+                <org.alco.anet.ConnectivitySegmentsView
+                    android:id="@+id/connectivitySegmentsView"
+                    android:layout_width="match_parent"
+                    android:layout_height="5dp"
+                    android:layout_marginTop="3dp" />
             </LinearLayout>
 
-            <!-- Разделитель -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:layout_marginVertical="2dp"
-                android:background="#383838" />
+                android:layout_marginVertical="4dp"
+                android:background="#2A2A2E" />
 
-            <!-- Нижний ряд: Total RX (rxm), Total TX (txm) -->
+            <!-- Линейный пульс -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:baselineAligned="false"
-                android:orientation="horizontal"
-                android:weightSum="2">
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-                <!-- Total RX -->
-                <LinearLayout
-                    android:layout_width="0dp"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_margin="3dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:text="Вы"
+                    android:textColor="#F2F3F6"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:letterSpacing="0.05"
-                        android:text="↓ TOTAL RX"
-                        android:textColor="#888888"
-                        android:textSize="8sp" />
+                <org.alco.anet.PulseLineView
+                    android:id="@+id/pulseLineView"
+                    android:layout_width="0dp"
+                    android:layout_height="15dp"
+                    android:layout_marginHorizontal="6dp"
+                    android:layout_weight="1" />
 
-                    <TextView
-                        android:id="@+id/tvRxm"
-                        android:layout_width="wrap_content"
+                <TextView
+                    android:id="@+id/tvRtt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:fontFamily="monospace"
+                    android:text="— мс"
+                    android:textColor="#00E676"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvPulseTarget"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:maxWidth="80dp"
+                    android:text="Сеть"
+                    android:textColor="#F2F3F6"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="4dp"
+                android:background="#2A2A2E" />
+
+            <!-- Скорость / Трафик + График -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal"
+                    android:weightSum="2">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="0 B"
-                        android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:letterSpacing="0.05"
+                            android:text="СКОРОСТЬ"
+                            android:textColor="#888888"
+                            android:textSize="8sp" />
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="↓ "
+                                android:textColor="#00E676"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvRx"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0 B/s"
+                                android:textColor="#FFFFFF"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
+                                android:text="↑ "
+                                android:textColor="#EEBC7A"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/tvTx"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0 B/s"
+                                android:textColor="#BDBDBD"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="end"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:letterSpacing="0.05"
+                            android:text="ЗА СЕССИЮ"
+                            android:textColor="#888888"
+                            android:textSize="8sp" />
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="↓ "
+                                android:textColor="#00E676"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/tvRxm"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0 B"
+                                android:textColor="#F2F3F6"
+                                android:textSize="10sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
+                                android:text="↑ "
+                                android:textColor="#EEBC7A"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/tvTxm"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0 B"
+                                android:textColor="#BDBDBD"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
                 </LinearLayout>
 
-                <!-- Total TX -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_margin="3dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:letterSpacing="0.05"
-                        android:text="↑ TOTAL TX"
-                        android:textColor="#888888"
-                        android:textSize="8sp" />
-
-                    <TextView
-                        android:id="@+id/tvTxm"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0 B"
-                        android:textColor="#F2F3F6"
-                        android:textSize="11sp" />
-                </LinearLayout>
+                <org.alco.anet.TelemetrySparklineView
+                    android:id="@+id/telemetrySparklineView"
+                    android:layout_width="match_parent"
+                    android:layout_height="24dp"
+                    android:layout_marginTop="2dp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -528,13 +633,12 @@
             android:background="@drawable/linear_radius"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:padding="8dp"
+            android:padding="6dp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/statsContainer">
 
-            <!-- Контейнер для версий (DISCONNECTED) -->
             <LinearLayout
                 android:id="@+id/versionInfoContainer"
                 android:layout_width="0dp"
@@ -549,7 +653,7 @@
                     android:fontFamily="monospace"
                     android:text="VERSION: v0.0.0 (32)"
                     android:textColor="@color/green"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -562,7 +666,6 @@
                     android:textSize="8sp" />
             </LinearLayout>
 
-            <!-- Текст последнего важного события (CONNECTING / CONNECTED) -->
             <TextView
                 android:id="@+id/tvVpnEventStatus"
                 android:layout_width="0dp"
@@ -572,12 +675,11 @@
                 android:fontFamily="monospace"
                 android:maxLines="2"
                 android:textColor="@color/white"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold"
                 android:visibility="gone"
                 tools:text="[17:03:52] Tunnel UP" />
 
-            <!-- Кнопка логов -->
             <Button
                 android:id="@+id/btnShowLogs"
                 android:layout_width="wrap_content"
@@ -586,11 +688,11 @@
                 android:backgroundTint="#333333"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="6dp"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp"
                 android:text="LOG"
                 android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:textSize="10sp" />
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
