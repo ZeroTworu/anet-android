@@ -27,7 +27,9 @@ class ANetVpnService : VpnService() {
     @Volatile private var isShuttingDown = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
-    private var lastNetwork: Network? = null
+    @Volatile private var lastNetwork: Network? = null
+    @Volatile private var hadActiveNetwork = false
+    @Volatile private var lastWakeLockRenewMs: Long = 0L
 
     // Поколение TUN-интерфейса. Защищает от гонки: отложенный closeTun(),
     // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
@@ -145,16 +147,29 @@ class ANetVpnService : VpnService() {
         return START_STICKY
     }
 
+    private fun renewWakeLock(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastWakeLockRenewMs < 60_000L) return
+        try {
+            wakeLock?.let {
+                it.acquire(10 * 60 * 1000L)
+                lastWakeLockRenewMs = now
+            }
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to renew WakeLock: ${e.message}")
+        }
+    }
+
     private fun acquireLocks() {
         try {
             if (wakeLock == null) {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
                 wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ANet:VpnWakeLock").apply {
                     setReferenceCounted(false)
-                    acquire(10 * 60 * 1000L) // Безопасный таймаут с продлением
                 }
-                Log.i("ANet", "WakeLock acquired")
+                Log.i("ANet", "WakeLock initialized")
             }
+            renewWakeLock(force = true)
         } catch (e: Exception) {
             Log.e("ANet", "Failed to acquire WakeLock: ${e.message}")
         }
@@ -228,8 +243,12 @@ class ANetVpnService : VpnService() {
                         return
                     }
 
-                    val isNetworkSwitch = lastNetwork != null && lastNetwork != network
+                    val isNetworkSwitch =
+                        (lastNetwork != null && lastNetwork != network) ||
+                        (lastNetwork == null && hadActiveNetwork)
                     lastNetwork = network
+                    hadActiveNetwork = true
+                    renewWakeLock(force = true)
                     Log.i("ANet", "Active physical network: $network (switch=$isNetworkSwitch)")
 
                     try {
@@ -239,7 +258,7 @@ class ANetVpnService : VpnService() {
                     }
 
                     if (isNetworkSwitch && !isShuttingDown) {
-                        Log.i("ANet", "Physical network switched! Triggering reconnect to bind to new network route...")
+                        Log.i("ANet", "Physical network switched or restored after sleep! Triggering reconnect...")
                         onStatusChanged("Сеть изменилась, переподключение...")
                         mainHandler.postDelayed({
                             if (!isShuttingDown) {
@@ -254,11 +273,11 @@ class ANetVpnService : VpnService() {
                     Log.i("ANet", "Physical network lost: $network")
                     if (lastNetwork == network) {
                         lastNetwork = null
-                    }
-                    try {
-                        setUnderlyingNetworks(null)
-                    } catch (e: Exception) {
-                        Log.e("ANet", "Failed to clear underlying networks: ${e.message}")
+                        try {
+                            setUnderlyingNetworks(null)
+                        } catch (e: Exception) {
+                            Log.e("ANet", "Failed to clear underlying networks: ${e.message}")
+                        }
                     }
                 }
             }
@@ -281,6 +300,7 @@ class ANetVpnService : VpnService() {
             networkCallback = null
         }
         lastNetwork = null
+        hadActiveNetwork = false
     }
 
     @Synchronized
@@ -317,10 +337,13 @@ class ANetVpnService : VpnService() {
         builder.setMtu(mtu)
         builder.setSession("ANet VPN")
 
+        renewWakeLock(force = true)
+
         if (allowedAppsCache.isNotEmpty()) {
             Log.i("ANet", "Per-App Mode ON. Allowing ${allowedAppsCache.size} specific apps.")
             onStatusChanged("App Split: Only specific apps use VPN")
             for (pkg in allowedAppsCache) {
+                if (pkg == packageName) continue
                 try {
                     builder.addAllowedApplication(pkg)
                 } catch (e: Exception) {
@@ -487,6 +510,7 @@ class ANetVpnService : VpnService() {
 
     @androidx.annotation.Keep
     fun onTrafficStats(rx: String, tx: String, rtt: String, rxm: String, txm: String) {
+        renewWakeLock(force = false)
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra(EXTRA_IS_STATS, true)
             putExtra(EXTRA_STATS_RX, rx)
