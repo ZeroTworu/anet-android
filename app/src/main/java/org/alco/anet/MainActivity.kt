@@ -82,6 +82,14 @@ data class ConfigItem(
     val isServerConfig: Boolean = false
 )
 
+data class RoutingOverrides(
+    val block: MutableList<String> = mutableListOf(),
+    val direct: MutableList<String> = mutableListOf(),
+    val proxy: MutableList<String> = mutableListOf()
+)
+
+enum class OverrideTab { DIRECT, BLOCK, PROXY }
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvRtt: TextView
@@ -166,6 +174,7 @@ class MainActivity : AppCompatActivity() {
 
         private const val MAX_LOG_LINES = 20000
         private const val PREF_SERVER_CONFIG_URL = "server_config_url"
+        private const val PREF_SERVER_ROUTING_OVERRIDES = "server_routing_overrides_json"
         const val SERVER_CONFIG_NAME = "Server config"
         const val SERVER_CONFIG_ID = "__SERVER_CONFIG__"
     }
@@ -287,6 +296,154 @@ class MainActivity : AppCompatActivity() {
         refreshConfigListRunnable?.run()
     }
 
+    // --- ЛОКАЛЬНЫЕ ПРАВИЛА (ROUTING OVERRIDES: BLOCK, DIRECT, PROXY) ---
+
+    private fun parseRoutingOverridesFromToml(toml: String): RoutingOverrides {
+        val result = RoutingOverrides()
+        val lines = toml.lines()
+        var inOverridesSection = false
+        var currentList: MutableList<String>? = null
+
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            if (line.startsWith("[") && line.endsWith("]")) {
+                inOverridesSection = line.equals("[routing.overrides]", ignoreCase = true)
+                currentList = null
+                continue
+            }
+
+            if (!inOverridesSection) continue
+
+            if (line.startsWith("block", ignoreCase = true)) {
+                currentList = result.block
+            } else if (line.startsWith("direct", ignoreCase = true)) {
+                currentList = result.direct
+            } else if (line.startsWith("proxy", ignoreCase = true)) {
+                currentList = result.proxy
+            }
+
+            if (currentList != null) {
+                val regex = Regex("\"([^\"]+)\"")
+                val matches = regex.findAll(line)
+                for (m in matches) {
+                    val value = m.groupValues[1].trim()
+                    if (value.isNotEmpty() && !currentList.contains(value)) {
+                        currentList.add(value)
+                    }
+                }
+                if (line.contains("]")) {
+                    currentList = null
+                }
+            }
+        }
+
+        return result
+    }
+
+    private fun injectRoutingOverridesToToml(toml: String, overrides: RoutingOverrides): String {
+        val lines = toml.lines().toMutableList()
+        var startIdx = -1
+        var endIdx = -1
+
+        for (i in lines.indices) {
+            val line = lines[i].trim()
+            if (line.equals("[routing.overrides]", ignoreCase = true)) {
+                startIdx = i
+                endIdx = lines.size
+                for (j in (i + 1) until lines.size) {
+                    val nextLine = lines[j].trim()
+                    if (nextLine.startsWith("[") && nextLine.endsWith("]")) {
+                        endIdx = j
+                        break
+                    }
+                }
+                break
+            }
+        }
+
+        val blockFormatted = overrides.block.joinToString(",\n") { "    \"$it\"" }
+        val directFormatted = overrides.direct.joinToString(",\n") { "    \"$it\"" }
+        val proxyFormatted = overrides.proxy.joinToString(",\n") { "    \"$it\"" }
+
+        val newSection = buildString {
+            appendLine("[routing.overrides]")
+            appendLine("block = [")
+            if (blockFormatted.isNotEmpty()) appendLine(blockFormatted)
+            appendLine("]")
+            appendLine("direct = [")
+            if (directFormatted.isNotEmpty()) appendLine(directFormatted)
+            appendLine("]")
+            appendLine("proxy = [")
+            if (proxyFormatted.isNotEmpty()) appendLine(proxyFormatted)
+            appendLine("]")
+        }
+
+        return if (startIdx != -1) {
+            val before = lines.subList(0, startIdx).joinToString("\n")
+            val after = lines.subList(endIdx, lines.size).joinToString("\n")
+            listOf(before.trimEnd(), newSection.trim(), after.trimStart())
+                .filter { it.isNotEmpty() }
+                .joinToString("\n\n")
+        } else {
+            toml.trimEnd() + "\n\n" + newSection.trim()
+        }
+    }
+
+    private fun loadActiveRoutingOverrides(): RoutingOverrides {
+        val isServerCfg = selectedConfigName == SERVER_CONFIG_NAME
+        if (isServerCfg) {
+            val jsonStr = getAppPrefs().getString(PREF_SERVER_ROUTING_OVERRIDES, null)
+            if (!jsonStr.isNullOrEmpty()) {
+                try {
+                    val obj = JSONObject(jsonStr)
+                    val ovr = RoutingOverrides()
+                    obj.optJSONArray("block")?.let { arr ->
+                        for (i in 0 until arr.length()) ovr.block.add(arr.getString(i))
+                    }
+                    obj.optJSONArray("direct")?.let { arr ->
+                        for (i in 0 until arr.length()) ovr.direct.add(arr.getString(i))
+                    }
+                    obj.optJSONArray("proxy")?.let { arr ->
+                        for (i in 0 until arr.length()) ovr.proxy.add(arr.getString(i))
+                    }
+                    return ovr
+                } catch (_: Exception) {}
+            }
+        }
+
+        return parseRoutingOverridesFromToml(selectedConfigContent ?: "")
+    }
+
+    private fun saveActiveRoutingOverrides(overrides: RoutingOverrides) {
+        val currentContent = selectedConfigContent ?: return
+        val updatedToml = injectRoutingOverridesToToml(currentContent, overrides)
+        val isServerCfg = selectedConfigName == SERVER_CONFIG_NAME
+
+        if (isServerCfg) {
+            val obj = JSONObject().apply {
+                put("block", JSONArray(overrides.block))
+                put("direct", JSONArray(overrides.direct))
+                put("proxy", JSONArray(overrides.proxy))
+            }
+            getAppPrefs().edit().putString(PREF_SERVER_ROUTING_OVERRIDES, obj.toString()).apply()
+            setServerConfig(updatedToml)
+        } else {
+            selectedConfigContent = updatedToml
+            saveConfigToPrefs(updatedToml, selectedConfigName)
+
+            val configs = getSavedConfigs()
+            val prefs = getAppPrefs()
+            val activeId = prefs.getString("active_config_id", null)
+            val target = configs.find { it.id == activeId || it.name == selectedConfigName }
+            if (target != null) {
+                target.content = updatedToml
+                saveConfigsToPrefs(configs, activeId)
+            }
+        }
+
+        logToConsole("Правила [routing.overrides] успешно сохранены")
+    }
+
     // --- СКАЧИВАНИЕ И АВТООБНОВЛЕНИЕ СЕРВЕРНОГО КОНФИГА ---
 
     private fun fetchServerConfigFromUrl(
@@ -389,7 +546,12 @@ class MainActivity : AppCompatActivity() {
             if (servers != null && servers.isNotEmpty()) {
                 runOnUiThread {
                     saveServerUrl(normalized)
-                    setServerConfig(content)
+
+                    // Накладываем сохраненные пользователем оверлеи [routing.overrides]
+                    val savedOverrides = loadActiveRoutingOverrides()
+                    val finalContent = injectRoutingOverridesToToml(content, savedOverrides)
+
+                    setServerConfig(finalContent)
                     logToConsole("Серверный конфиг успешно обновлен (нод: ${servers.size})")
 
                     if (showToastOnSuccess) {
@@ -452,16 +614,13 @@ class MainActivity : AppCompatActivity() {
         initLogger()
         loadConfigFromPrefs()
 
-        // Проверяем наличие URL в хранилище для автообновления
         val savedServerUrl = getSavedServerUrl()
         val hasConfigs = getSavedConfigs().isNotEmpty()
 
         if (!savedServerUrl.isNullOrBlank()) {
-            // Подкачиваем свежую версию с сервера при каждом запуске
             logToConsole("Автообновление серверного конфига...")
             fetchServerConfigFromUrl(savedServerUrl, showToastOnSuccess = false)
         } else if (!hasConfigs) {
-            // Модалка открывается ТОЛЬКО при первом запуске без конфигов и ссылок
             showEnterUrlDialog()
         }
 
@@ -495,7 +654,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
 
-        // ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ПОВОРОТЕ ЭКРАНА
         if (savedInstanceState != null) {
             lastAccountGroup = savedInstanceState.getString("acc_group", "")
             lastAccountExpires = savedInstanceState.getString("acc_expires", "")
@@ -511,7 +669,6 @@ class MainActivity : AppCompatActivity() {
             tvTxm.text = savedInstanceState.getString("stat_txm", "0 B")
         }
 
-        // Восстанавливаем блок аккаунта
         if (lastAccountGroup.isNotEmpty()) {
             findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
             findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
@@ -520,7 +677,6 @@ class MainActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
         }
 
-        // Восстанавливаем статус события
         if (lastVpnEventText.isNotEmpty()) {
             tvVpnEventStatus.text = lastVpnEventText
             tvVpnEventStatus.setTextColor(lastVpnEventColor)
@@ -1464,6 +1620,13 @@ class MainActivity : AppCompatActivity() {
                 iconRes = R.drawable.apps_white
             ) {
                 startActivity(Intent(this, AppSelectionActivity::class.java))
+            },
+            SettingItem(
+                title = "Локальные правила (Overrides)",
+                subtitle = "Списки прямого доступа (Direct), блокировки (Block) и туннеля (Proxy)",
+                iconRes = R.drawable.dot
+            ) {
+                showRoutingOverridesDialog()
             }
         )
 
@@ -1626,6 +1789,339 @@ class MainActivity : AppCompatActivity() {
             dialogInstance.dismiss()
         }
 
+        dialogInstance.show()
+        dialogInstance.setContentView(rootLayout)
+        dialogInstance.window?.apply {
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+    }
+
+    // --- ДИАЛОГ РЕДАКТИРОВАНИЯ [ROUTING.OVERRIDES] ---
+
+    private fun showRoutingOverridesDialog() {
+        val overrides = loadActiveRoutingOverrides()
+        var currentTab = OverrideTab.DIRECT
+        var dialogInstance: AlertDialog? = null
+
+        val rootLayout = LinearLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#121212"))
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setPadding(20.dpToPx(), 20.dpToPx(), 20.dpToPx(), 20.dpToPx())
+        }
+
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 16.dpToPx())
+            }
+        }
+
+        val btnClose = android.widget.ImageButton(this).apply {
+            setImageResource(R.drawable.ic_back)
+            setColorFilter(Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#262626"))
+            }
+            val buttonSize = 40.dpToPx()
+            layoutParams = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+                setMargins(0, 0, 16.dpToPx(), 0)
+            }
+            setPadding(10.dpToPx(), 10.dpToPx(), 10.dpToPx(), 10.dpToPx())
+            setupTvFocusAnimator()
+        }
+
+        val titleCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        val titleView = TextView(this).apply {
+            text = "Локальные правила (Overrides)"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        }
+
+        val subTitleView = TextView(this).apply {
+            text = "Профиль: $selectedConfigName"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.parseColor("#EEBC7A"))
+        }
+
+        titleCol.addView(titleView)
+        titleCol.addView(subTitleView)
+        headerLayout.addView(btnClose)
+        headerLayout.addView(titleCol)
+
+        val tabsLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = 3f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 10.dpToPx())
+            }
+        }
+
+        val btnTabDirect = Button(this)
+        val btnTabBlock = Button(this)
+        val btnTabProxy = Button(this)
+
+        val tvHint = TextView(this).apply {
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(4.dpToPx(), 0, 4.dpToPx(), 10.dpToPx())
+        }
+
+        val inputLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 12.dpToPx())
+            }
+        }
+
+        val etInput = EditText(this).apply {
+            hint = "*.domain, 192.168.1.0/24"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#7E7E7E"))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(14.dpToPx(), 12.dpToPx(), 14.dpToPx(), 12.dpToPx())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * resources.displayMetrics.density
+                setColor(Color.parseColor("#1C1C1E"))
+            }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                setMargins(0, 0, 8.dpToPx(), 0)
+            }
+        }
+
+        val btnAdd = Button(this).apply {
+            text = "ДОБАВИТЬ"
+            setTextColor(Color.BLACK)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * resources.displayMetrics.density
+                setColor(Color.parseColor("#EEBC7A"))
+            }
+            setupTvFocusAnimator()
+        }
+
+        inputLayout.addView(etInput)
+        inputLayout.addView(btnAdd)
+
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f)
+        }
+
+        val listContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        scrollView.addView(listContainer)
+
+        val btnSaveApply = Button(this).apply {
+            text = "СОХРАНИТЬ И ПРИМЕНИТЬ"
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 12f * resources.displayMetrics.density
+                setColor(Color.parseColor("#375417"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                48.dpToPx()
+            ).apply {
+                setMargins(0, 12.dpToPx(), 0, 0)
+            }
+            setupTvFocusAnimator()
+        }
+
+        fun updateTabsAndList() {
+            val styleTab = { btn: Button, title: String, count: Int, isSel: Boolean, activeColor: Int ->
+                btn.text = "$title ($count)"
+                btn.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11f)
+                btn.setTypeface(null, android.graphics.Typeface.BOLD)
+                btn.setTextColor(if (isSel) Color.BLACK else activeColor)
+                btn.background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 8f * resources.displayMetrics.density
+                    setColor(if (isSel) activeColor else Color.parseColor("#1C1C1E"))
+                }
+                btn.layoutParams = LinearLayout.LayoutParams(0, 38.dpToPx(), 1.0f).apply {
+                    setMargins(3.dpToPx(), 0, 3.dpToPx(), 0)
+                }
+            }
+
+            styleTab(btnTabDirect, "Direct", overrides.direct.size, currentTab == OverrideTab.DIRECT, Color.parseColor("#4CAF50"))
+            styleTab(btnTabBlock, "Block", overrides.block.size, currentTab == OverrideTab.BLOCK, Color.parseColor("#FF5252"))
+            styleTab(btnTabProxy, "Proxy", overrides.proxy.size, currentTab == OverrideTab.PROXY, Color.parseColor("#EEBC7A"))
+
+            when (currentTab) {
+                OverrideTab.DIRECT -> {
+                    tvHint.text = "⚡ Direct Split: трафик идёт напрямую мимо VPN через физическую сеть."
+                    tvHint.setTextColor(Color.parseColor("#4CAF50"))
+                    etInput.hint = "*.home.arpa, 192.168.1.0/24"
+                }
+                OverrideTab.BLOCK -> {
+                    tvHint.text = "🚫 Block: запросы блокируются локально внутри DNS (0.0.0.0)."
+                    tvHint.setTextColor(Color.parseColor("#FF5252"))
+                    etInput.hint = "metrics.telemetry.com, 198.51.100.0/24"
+                }
+                OverrideTab.PROXY -> {
+                    tvHint.text = "🛡️ Proxy: трафик принудительно направляется в шифрованный VPN-туннель."
+                    tvHint.setTextColor(Color.parseColor("#EEBC7A"))
+                    etInput.hint = "blocked-service.dev, internal-api.io"
+                }
+            }
+
+            listContainer.removeAllViews()
+            val currentItems = when (currentTab) {
+                OverrideTab.DIRECT -> overrides.direct
+                OverrideTab.BLOCK -> overrides.block
+                OverrideTab.PROXY -> overrides.proxy
+            }
+
+            if (currentItems.isEmpty()) {
+                val emptyTv = TextView(this@MainActivity).apply {
+                    text = "Список пуст"
+                    setTextColor(Color.GRAY)
+                    setPadding(16.dpToPx(), 32.dpToPx(), 16.dpToPx(), 32.dpToPx())
+                    gravity = android.view.Gravity.CENTER
+                }
+                listContainer.addView(emptyTv)
+            } else {
+                for ((index, item) in currentItems.withIndex()) {
+                    val row = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(12.dpToPx(), 10.dpToPx(), 12.dpToPx(), 10.dpToPx())
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            cornerRadius = 8f * resources.displayMetrics.density
+                            setColor(Color.parseColor("#1C1C1E"))
+                        }
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            setMargins(0, 4.dpToPx(), 0, 4.dpToPx())
+                        }
+                    }
+
+                    val bulletColor = when (currentTab) {
+                        OverrideTab.DIRECT -> Color.parseColor("#4CAF50")
+                        OverrideTab.BLOCK -> Color.parseColor("#FF5252")
+                        OverrideTab.PROXY -> Color.parseColor("#EEBC7A")
+                    }
+
+                    val bullet = TextView(this@MainActivity).apply {
+                        text = "• "
+                        setTextColor(bulletColor)
+                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+                    }
+
+                    val tvItem = TextView(this@MainActivity).apply {
+                        text = item
+                        setTextColor(Color.WHITE)
+                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+                        typeface = android.graphics.Typeface.MONOSPACE
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                    }
+
+                    val btnDelete = android.widget.ImageButton(this@MainActivity).apply {
+                        setImageResource(R.drawable.delete)
+                        setColorFilter(Color.parseColor("#FF5252"))
+                        setBackgroundColor(Color.TRANSPARENT)
+                        val iconSize = 20.dpToPx()
+                        layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+                        setOnClickListener {
+                            currentItems.removeAt(index)
+                            updateTabsAndList()
+                        }
+                    }
+
+                    row.addView(bullet)
+                    row.addView(tvItem)
+                    row.addView(btnDelete)
+                    listContainer.addView(row)
+                }
+            }
+        }
+
+        btnTabDirect.setOnClickListener { currentTab = OverrideTab.DIRECT; updateTabsAndList() }
+        btnTabBlock.setOnClickListener { currentTab = OverrideTab.BLOCK; updateTabsAndList() }
+        btnTabProxy.setOnClickListener { currentTab = OverrideTab.PROXY; updateTabsAndList() }
+
+        tabsLayout.addView(btnTabDirect)
+        tabsLayout.addView(btnTabBlock)
+        tabsLayout.addView(btnTabProxy)
+
+        btnAdd.setOnClickListener {
+            val target = etInput.text.toString().trim()
+            if (target.isEmpty() || target.contains(" ")) {
+                Toast.makeText(this, "Укажите корректный домен, IP или CIDR", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val currentList = when (currentTab) {
+                OverrideTab.DIRECT -> overrides.direct
+                OverrideTab.BLOCK -> overrides.block
+                OverrideTab.PROXY -> overrides.proxy
+            }
+
+            if (currentList.contains(target)) {
+                Toast.makeText(this, "Правило уже существует в этом списке", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            currentList.add(target)
+            etInput.setText("")
+            updateTabsAndList()
+        }
+
+        btnSaveApply.setOnClickListener {
+            saveActiveRoutingOverrides(overrides)
+            Toast.makeText(this, "Правила сохранены", Toast.LENGTH_SHORT).show()
+
+            if (isVpnConnected) {
+                logToConsole("Переподключение VPN с обновленными правилами...")
+                stopVpnService()
+                mainHandler.postDelayed({
+                    attemptVpnConnection()
+                }, 600)
+            }
+            dialogInstance?.dismiss()
+        }
+
+        btnClose.setOnClickListener { dialogInstance?.dismiss() }
+
+        rootLayout.addView(headerLayout)
+        rootLayout.addView(tabsLayout)
+        rootLayout.addView(tvHint)
+        rootLayout.addView(inputLayout)
+        rootLayout.addView(scrollView)
+        rootLayout.addView(btnSaveApply)
+
+        updateTabsAndList()
+
+        dialogInstance = AlertDialog.Builder(this).create()
         dialogInstance.show()
         dialogInstance.setContentView(rootLayout)
         dialogInstance.window?.apply {
@@ -2014,7 +2510,7 @@ class MainActivity : AppCompatActivity() {
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
+    ) { _ ->
         attemptVpnConnection()
     }
 
@@ -2221,7 +2717,6 @@ class MainActivity : AppCompatActivity() {
             val status = intent?.getStringExtra("status") ?: return
             logToConsole(status)
 
-            // Ключевые статусные события выводим в плашку
             if (status.contains("Starting", ignoreCase = true) ||
                 status.contains("Connecting", ignoreCase = true) ||
                 status.contains("Phase", ignoreCase = true) ||
@@ -2647,7 +3142,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        // Сохраняем данные аккаунта
         outState.putString("acc_group", findViewById<TextView>(R.id.tvAccountGroup)?.text?.toString().orEmpty())
         outState.putString("acc_expires", findViewById<TextView>(R.id.tvAccountExpires)?.text?.toString().orEmpty())
         outState.putString("acc_traffic", findViewById<TextView>(R.id.tvAccountTraffic)?.text?.toString().orEmpty())
@@ -2659,7 +3153,6 @@ class MainActivity : AppCompatActivity() {
         outState.putString("stat_rxm", tvRxm.text?.toString().orEmpty())
         outState.putString("stat_txm", tvTxm.text?.toString().orEmpty())
 
-        // Сохраняем статус события
         outState.putString("vpn_event_text", tvVpnEventStatus.text?.toString().orEmpty())
         outState.putInt("vpn_event_color", tvVpnEventStatus.currentTextColor)
     }
