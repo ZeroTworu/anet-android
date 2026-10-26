@@ -90,8 +90,16 @@ class ANetVpnService : VpnService() {
         const val EXTRA_TEL_TX_SPEED_STR = "tel_tx_speed_str"
         const val EXTRA_TEL_TOTAL_RX_STR = "tel_total_rx_str"
         const val EXTRA_TEL_TOTAL_TX_STR = "tel_total_tx_str"
-        const val EXTRA_TEL_RX_CURVE = "tel_rx_curve"
+                const val EXTRA_TEL_RX_CURVE = "tel_rx_curve"
         const val EXTRA_TEL_TX_CURVE = "tel_tx_curve"
+        const val EXTRA_IS_NODE_PROBE = "is_node_probe"
+        const val EXTRA_PROBE_IDS = "probe_ids"
+        const val EXTRA_PROBE_NAMES = "probe_names"
+        const val EXTRA_PROBE_STATUSES = "probe_statuses"
+        const val EXTRA_PROBE_RTTS = "probe_rtts"
+        const val EXTRA_PROBE_REACHABLES = "probe_reachables"
+        const val EXTRA_PROBE_TOTALS = "probe_totals"
+        const val EXTRA_PROBE_PROTOS = "probe_protos"
 
         const val STATE_DISCONNECTED = 0
         const val STATE_CONNECTING = 1
@@ -604,6 +612,30 @@ class ANetVpnService : VpnService() {
             putExtra(EXTRA_TEL_TOTAL_TX_STR, totalTxStr)
             putExtra(EXTRA_TEL_RX_CURVE, rxCurve)
             putExtra(EXTRA_TEL_TX_CURVE, txCurve)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    @androidx.annotation.Keep
+    fun onNodeProbeUpdated(
+        ids: Array<String>,
+        names: Array<String>,
+        statuses: IntArray,
+        rtts: IntArray,
+        reachables: IntArray,
+        totals: IntArray,
+        protos: Array<String>
+    ) {
+        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_IS_NODE_PROBE, true)
+            putExtra(EXTRA_PROBE_IDS, ids)
+            putExtra(EXTRA_PROBE_NAMES, names)
+            putExtra(EXTRA_PROBE_STATUSES, statuses)
+            putExtra(EXTRA_PROBE_RTTS, rtts)
+            putExtra(EXTRA_PROBE_REACHABLES, reachables)
+            putExtra(EXTRA_PROBE_TOTALS, totals)
+            putExtra(EXTRA_PROBE_PROTOS, protos)
             setPackage(packageName)
         }
         sendBroadcast(intent)

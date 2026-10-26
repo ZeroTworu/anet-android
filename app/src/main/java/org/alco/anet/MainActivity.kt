@@ -31,6 +31,8 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -73,6 +75,37 @@ import javax.net.ssl.X509TrustManager
 
 data class ServerModel(val id: String, val name: String) {
     fun getFormattedName() = name
+}
+
+data class NodeProbeEntry(
+    val groupId: String,
+    val groupName: String,
+    val status: Int,
+    val bestRttMs: Int,
+    val reachableEndpoints: Int,
+    val totalEndpoints: Int,
+    val protocolsText: String
+) {
+    companion object {
+        const val STATUS_CHECKING = 0
+        const val STATUS_AVAILABLE = 1
+        const val STATUS_DEGRADED = 2
+        const val STATUS_UNAVAILABLE = 3
+    }
+
+    fun badgeColor(): Int = when (status) {
+        STATUS_AVAILABLE -> Color.parseColor("#38C976")
+        STATUS_DEGRADED -> Color.parseColor("#F5A623")
+        STATUS_UNAVAILABLE -> Color.parseColor("#E5534B")
+        else -> Color.parseColor("#787C84")
+    }
+
+    fun badgeLabel(): String = when (status) {
+        STATUS_AVAILABLE -> if (bestRttMs >= 0) "$bestRttMs мс" else "OK"
+        STATUS_DEGRADED -> if (bestRttMs >= 0) "~$bestRttMs мс ($reachableEndpoints/$totalEndpoints)" else "частично ($reachableEndpoints/$totalEndpoints)"
+        STATUS_UNAVAILABLE -> "недоступен"
+        else -> "..."
+    }
 }
 
 data class ConfigItem(
@@ -172,8 +205,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val availableServers = mutableListOf<ServerModel>()
+        private val availableServers = mutableListOf<ServerModel>()
     private var selectedServerName: String = ""
+    private val nodeProbeEntries = mutableListOf<NodeProbeEntry>()
+    private var serverDropdownAdapter: BaseAdapter? = null
 
     private external fun getAppVersion(): String
     private external fun getBuildInfo(): String
@@ -2696,11 +2731,9 @@ class MainActivity : AppCompatActivity() {
 
         serverSelectContainer.visibility = View.VISIBLE
 
-        val formattedNames = availableServers.map { it.getFormattedName() }
-
         val prefs = getAppPrefs()
         val lastSelected = prefs.getString("selected_server_${selectedConfigName}", "") ?: ""
-        val index = availableServers.indexOfFirst { it.id == lastSelected }
+        val index = availableServers.indexOfFirst { it.id == lastSelected || it.name == lastSelected }
 
         if (index >= 0) {
             selectedServerName = availableServers[index].id
@@ -2710,6 +2743,7 @@ class MainActivity : AppCompatActivity() {
             serverSelectTextView.text = availableServers.first().name
             prefs.edit().putString("selected_server_${selectedConfigName}", selectedServerName).apply()
         }
+        refreshSelectedServerIndicator()
 
         val listPopupWindow = ListPopupWindow(this, null, androidx.appcompat.R.attr.listPopupWindowStyle)
         listPopupWindow.anchorView = serverSelectContainer
@@ -2717,7 +2751,75 @@ class MainActivity : AppCompatActivity() {
         listPopupWindow.inputMethodMode = ListPopupWindow.INPUT_METHOD_NOT_NEEDED
         listPopupWindow.setBackgroundDrawable(ContextCompat.getDrawable(this, R.drawable.popup_bg))
 
-        val adapter = ArrayAdapter(this, R.layout.spinner_dropdown_item, formattedNames)
+        val adapter = object : BaseAdapter() {
+            override fun getCount(): Int = availableServers.size
+            override fun getItem(position: Int): Any = availableServers[position]
+            override fun getItemId(position: Int): Long = position.toLong()
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+                val server = availableServers[position]
+                val probe = findNodeProbe(server)
+                val statusColor = probe?.badgeColor() ?: Color.parseColor("#787C84")
+                val badgeText = probe?.badgeLabel() ?: "..."
+                val protoSub = probe?.protocolsText.orEmpty()
+
+                val row = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(14.dpToPx(), 11.dpToPx(), 14.dpToPx(), 11.dpToPx())
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.item_with_divider_selector)
+                }
+
+                val dot = View(this@MainActivity).apply {
+                    val dSize = 9.dpToPx()
+                    layoutParams = LinearLayout.LayoutParams(dSize, dSize).apply {
+                        setMargins(0, 0, 10.dpToPx(), 0)
+                    }
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(statusColor)
+                    }
+                }
+
+                val textCol = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                }
+
+                val nameTv = TextView(this@MainActivity).apply {
+                    text = server.getFormattedName()
+                    setTextColor(Color.WHITE)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                    setSingleLine(true)
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                textCol.addView(nameTv)
+
+                if (protoSub.isNotBlank()) {
+                    val protoTv = TextView(this@MainActivity).apply {
+                        text = protoSub
+                        setTextColor(Color.parseColor("#9E9EA6"))
+                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10.5f)
+                        setSingleLine(true)
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
+                    textCol.addView(protoTv)
+                }
+
+                val badgeTv = TextView(this@MainActivity).apply {
+                    text = badgeText
+                    setTextColor(statusColor)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setPadding(8.dpToPx(), 0, 0, 0)
+                }
+
+                row.addView(dot)
+                row.addView(textCol)
+                row.addView(badgeTv)
+                return row
+            }
+        }
+        serverDropdownAdapter = adapter
         listPopupWindow.setAdapter(adapter)
 
         listPopupWindow.setOnItemClickListener { _, _, position, _ ->
@@ -2726,6 +2828,7 @@ class MainActivity : AppCompatActivity() {
                 selectedServerName = server.id
                 serverSelectTextView.text = server.name
                 prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
+                refreshSelectedServerIndicator()
                 logToConsole("Выбрана нода: ${server.name}")
             }
             listPopupWindow.dismiss()
@@ -2865,18 +2968,29 @@ class MainActivity : AppCompatActivity() {
                     selectedServerName = server.id
                     serverSelectTextView.text = server.name
                     prefs.edit().putString("selected_server_${selectedConfigName}", server.id).apply()
+                    refreshSelectedServerIndicator()
                     logToConsole("Выбрана нода: ${server.name}")
                     dialog.dismiss()
                 }
             }
 
+            val probe = findNodeProbe(server)
+            val probeColor = probe?.badgeColor() ?: Color.parseColor("#787C84")
+            val badgeText = probe?.badgeLabel() ?: "..."
+            val protoSub = probe?.protocolsText.orEmpty()
+
             val dotView = ImageView(this).apply {
                 setImageResource(if (isSelected) R.drawable.leftchev else R.drawable.dot)
-                setColorFilter(if (isSelected) Color.parseColor("#8BC34A") else Color.parseColor("#666666"))
+                setColorFilter(if (isSelected) Color.parseColor("#8BC34A") else probeColor)
                 val s = if (isSelected) 18.dpToPx() else 10.dpToPx()
                 layoutParams = LinearLayout.LayoutParams(s, s).apply {
                     setMargins(0, 0, 12.dpToPx(), 0)
                 }
+            }
+
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
             }
 
             val nameTv = TextView(this).apply {
@@ -2884,11 +2998,29 @@ class MainActivity : AppCompatActivity() {
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
                 setTypeface(null, if (isSelected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                 setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+            textCol.addView(nameTv)
+
+            if (protoSub.isNotBlank()) {
+                val protoTv = TextView(this).apply {
+                    text = protoSub
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11f)
+                    setTextColor(Color.parseColor("#9E9EA6"))
+                }
+                textCol.addView(protoTv)
+            }
+
+            val badgeTv = TextView(this).apply {
+                text = badgeText
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(probeColor)
+                setPadding(10.dpToPx(), 0, 0, 0)
             }
 
             rowLayout.addView(dotView)
-            rowLayout.addView(nameTv)
+            rowLayout.addView(textCol)
+            rowLayout.addView(badgeTv)
             listContainer.addView(rowLayout)
 
             if (isSelected || selectedRowView == null) {
@@ -2947,6 +3079,18 @@ class MainActivity : AppCompatActivity() {
                     domesticOk = intent.getIntExtra(ANetVpnService.EXTRA_CONN_DOMESTIC_OK, 0),
                     domesticTotal = intent.getIntExtra(ANetVpnService.EXTRA_CONN_DOMESTIC_TOTAL, 5)
                 )
+                return
+            }
+
+            if (intent?.getBooleanExtra(ANetVpnService.EXTRA_IS_NODE_PROBE, false) == true) {
+                val ids = intent.getStringArrayExtra(ANetVpnService.EXTRA_PROBE_IDS) ?: emptyArray()
+                val names = intent.getStringArrayExtra(ANetVpnService.EXTRA_PROBE_NAMES) ?: emptyArray()
+                val statuses = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_STATUSES) ?: IntArray(0)
+                val rtts = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_RTTS) ?: IntArray(0)
+                val reachables = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_REACHABLES) ?: IntArray(0)
+                val totals = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_TOTALS) ?: IntArray(0)
+                val protos = intent.getStringArrayExtra(ANetVpnService.EXTRA_PROBE_PROTOS) ?: emptyArray()
+                applyNodeProbeSnapshot(ids, names, statuses, rtts, reachables, totals, protos)
                 return
             }
 
@@ -3143,7 +3287,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
                     serverSelectContainer.isEnabled = true
-                    serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#9E9E9E"))
+                    refreshSelectedServerIndicator()
                     serverSelectIcon.setImageResource(R.drawable.chevron_down)
                 }
 
@@ -3393,6 +3537,96 @@ class MainActivity : AppCompatActivity() {
             rxCurve = rxCurve,
             txCurve = txCurve
         )
+    }
+
+    @Keep
+    fun onNodeProbeUpdated(
+        ids: Array<String>,
+        names: Array<String>,
+        statuses: IntArray,
+        rtts: IntArray,
+        reachables: IntArray,
+        totals: IntArray,
+        protos: Array<String>
+    ) {
+        applyNodeProbeSnapshot(ids, names, statuses, rtts, reachables, totals, protos)
+    }
+
+    private fun normalizeProbeKey(raw: String): String {
+        return raw.trim().lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+    }
+
+    private fun findNodeProbe(server: ServerModel): NodeProbeEntry? {
+        val rawName = server.name.trim()
+        val rawId = server.id.trim()
+        nodeProbeEntries.firstOrNull {
+            it.groupName.equals(rawName, ignoreCase = true) ||
+                it.groupId.equals(rawId, ignoreCase = true) ||
+                it.groupName.equals(rawId, ignoreCase = true) ||
+                it.groupId.equals(rawName, ignoreCase = true)
+        }?.let { return it }
+
+        val normName = normalizeProbeKey(rawName)
+        val normId = normalizeProbeKey(rawId)
+        return nodeProbeEntries.firstOrNull {
+            val gId = normalizeProbeKey(it.groupId)
+            val gName = normalizeProbeKey(it.groupName)
+            (normName.isNotEmpty() && (gName == normName || gId == normName)) ||
+                (normId.isNotEmpty() && (gId == normId || gName == normId))
+        }
+    }
+
+    private fun refreshSelectedServerIndicator() {
+        if (currentUiState != State.DISCONNECTED) {
+            serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#669D29"))
+            return
+        }
+        val currentServer = availableServers.firstOrNull {
+            it.id == selectedServerName || it.name == selectedServerName
+        } ?: availableServers.firstOrNull()
+        val probeColor = currentServer?.let { findNodeProbe(it)?.badgeColor() }
+            ?: Color.parseColor("#9E9E9E")
+        serverIndicator.imageTintList = ColorStateList.valueOf(probeColor)
+    }
+
+    private fun applyNodeProbeSnapshot(
+        ids: Array<String>,
+        names: Array<String>,
+        statuses: IntArray,
+        rtts: IntArray,
+        reachables: IntArray,
+        totals: IntArray,
+        protos: Array<String>
+    ) {
+        val count = minOf(
+            ids.size,
+            names.size,
+            statuses.size,
+            rtts.size,
+            reachables.size,
+            totals.size,
+            protos.size
+        )
+        val updated = ArrayList<NodeProbeEntry>(count)
+        for (i in 0 until count) {
+            updated.add(
+                NodeProbeEntry(
+                    groupId = ids[i],
+                    groupName = names[i],
+                    status = statuses[i],
+                    bestRttMs = rtts[i],
+                    reachableEndpoints = reachables[i],
+                    totalEndpoints = totals[i],
+                    protocolsText = protos[i]
+                )
+            )
+        }
+        runOnUiThread {
+            nodeProbeEntries.clear()
+            nodeProbeEntries.addAll(updated)
+            refreshSelectedServerIndicator()
+            serverDropdownAdapter?.notifyDataSetChanged()
+        }
     }
 
     private fun applyConnectivityState(
