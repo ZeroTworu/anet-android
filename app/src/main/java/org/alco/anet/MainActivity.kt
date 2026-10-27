@@ -3396,7 +3396,7 @@ class MainActivity : AppCompatActivity() {
                     isVpnConnected = true
                     val activeNodeLabel = serverSelectTextView.text?.toString()?.takeIf { it.isNotBlank() } ?: "Туннель"
                     tvPulseTarget.text = activeNodeLabel
-                    if (wasDisconnected) {
+                    if (wasDisconnected && useKotlinFallbackProber) {
                         requestConnectivityRecheck(silent = true)
                     }
                     spinner.visibility = View.INVISIBLE
@@ -3526,6 +3526,9 @@ class MainActivity : AppCompatActivity() {
                 lastConnRttMs = parsedRtt
                 tvRtt.text = "$parsedRtt мс"
                 pulseLineView.updateState(lastConnPulseColor, parsedRtt)
+                if (currentUiState == State.CONNECTED) {
+                    refreshSelectedServerIndicator()
+                }
             } else if (rtt.isNotBlank() && lastConnRttMs <= 0L) {
                 tvRtt.text = rtt.replace("ms", " мс")
             }
@@ -3736,7 +3739,7 @@ class MainActivity : AppCompatActivity() {
         } ?: availableServers.firstOrNull()
         val probe = currentServer?.let { findNodeProbe(it) }
 
-        if (currentUiState == State.CONNECTED && (probe == null || probe.status == NodeProbeEntry.STATUS_UNAVAILABLE)) {
+        if (currentUiState == State.CONNECTED && (probe == null || probe.status == NodeProbeEntry.STATUS_UNAVAILABLE || probe.status == NodeProbeEntry.STATUS_CHECKING)) {
             val green = Color.parseColor("#38C976")
             tvSelectedServerRtt.text = if (lastConnRttMs > 0L) "${lastConnRttMs} мс" else "В СЕТИ"
             tvSelectedServerRtt.setTextColor(green)
@@ -3904,6 +3907,9 @@ class MainActivity : AppCompatActivity() {
                 lastConnRttMs = rttMs
                 tvRtt.text = "$rttMs мс"
                 pulseLineView.updateState(lastConnPulseColor, rttMs)
+                if (currentUiState == State.CONNECTED) {
+                    refreshSelectedServerIndicator()
+                }
             }
 
             if (rxCurve.isNotEmpty() || txCurve.isNotEmpty()) {
