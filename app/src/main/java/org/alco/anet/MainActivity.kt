@@ -173,6 +173,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: Button
 
     private lateinit var serverSelectContainer: LinearLayout
+    private lateinit var btnRefreshNodes: TextView
     private lateinit var serverSelectTextView: TextView
     private lateinit var tvSelectedServerRtt: TextView
     private lateinit var serverIndicator: ImageView
@@ -700,10 +701,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         serverSelectContainer = findViewById(R.id.serverSelectContainer)
+        btnRefreshNodes = findViewById(R.id.btnRefreshNodes)
         serverSelectTextView = findViewById(R.id.serverSelectTextView)
         tvSelectedServerRtt = findViewById(R.id.tvSelectedServerRtt)
         serverIndicator = findViewById(R.id.serverIndicator)
         serverSelectIcon = findViewById(R.id.serverSelectIcon)
+
+        btnRefreshNodes.setupTvFocusAnimator()
+        btnRefreshNodes.setOnClickListener {
+            btnRefreshNodes.animate().rotationBy(360f).setDuration(450).start()
+            requestConnectivityRecheck(silent = false)
+        }
         nodeProbeProgressContainer = findViewById(R.id.nodeProbeProgressContainer)
         pbNodeProbe = findViewById(R.id.pbNodeProbe)
         tvNodeProbeProgress = findViewById(R.id.tvNodeProbeProgress)
@@ -3419,6 +3427,7 @@ class MainActivity : AppCompatActivity() {
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
                     serverSelectContainer.isEnabled = true
                     serverSelectIcon.setImageResource(R.drawable.block)
+                    refreshSelectedServerIndicator()
                 }
             }
         }
@@ -3726,6 +3735,15 @@ class MainActivity : AppCompatActivity() {
             it.id == selectedServerName || it.name == selectedServerName
         } ?: availableServers.firstOrNull()
         val probe = currentServer?.let { findNodeProbe(it) }
+
+        if (currentUiState == State.CONNECTED && (probe == null || probe.status == NodeProbeEntry.STATUS_UNAVAILABLE)) {
+            val green = Color.parseColor("#38C976")
+            tvSelectedServerRtt.text = if (lastConnRttMs > 0L) "${lastConnRttMs} мс" else "В СЕТИ"
+            tvSelectedServerRtt.setTextColor(green)
+            serverIndicator.imageTintList = ColorStateList.valueOf(green)
+            return
+        }
+
         val probeColor = probe?.badgeColor() ?: Color.parseColor("#9E9E9E")
         val badgeText = probe?.badgeLabel() ?: "..."
 
@@ -3838,6 +3856,9 @@ class MainActivity : AppCompatActivity() {
             connectivityBadgeDot.imageTintList = ColorStateList.valueOf(activeColor)
             tvConnectivityTitle.text = lastConnTitle
             tvConnectivitySubtitle.text = lastConnSubtitle
+            if (currentUiState == State.CONNECTED) {
+                refreshSelectedServerIndicator()
+            }
             tvConnectivityNodes.text = "РФ $domesticOk/${lastConnDomesticTotal} • Мир $globalOk/${lastConnGlobalTotal}"
             connectivitySegmentsView.setProbes(
                 domOk = domesticOk,
@@ -3942,7 +3963,7 @@ class MainActivity : AppCompatActivity() {
     private fun runSingleKotlinFallbackProbe() {
         Thread {
             val domesticHosts = parseTomlStringArray(selectedConfigContent, "domestic_targets")
-                .ifEmpty { listOf("https://ya.ru", "https://vk.com", "https://www.gosuslugi.ru") }
+                .ifEmpty { listOf("https://ya.ru", "https://vk.com", "https://dzen.ru") }
             val globalHosts = parseTomlStringArray(selectedConfigContent, "global_targets")
                 .ifEmpty { listOf("https://www.google.com/generate_204", "https://connectivitycheck.gstatic.com/generate_204", "https://store.steampowered.com/favicon.ico") }
             var domOk = 0
@@ -3950,7 +3971,10 @@ class MainActivity : AppCompatActivity() {
             var bestRtt = Long.MAX_VALUE
 
             for (urlStr in domesticHosts) {
-                val rtt = probeHttpHead(urlStr, 2200)
+                var rtt = probeHttpHead(urlStr, 2200)
+                if (rtt <= 0L && urlStr.contains("gosuslugi.ru", ignoreCase = true)) {
+                    rtt = probeHttpHead("https://dzen.ru", 2200)
+                }
                 if (rtt > 0L) {
                     domOk++
                     if (rtt < bestRtt) bestRtt = rtt
