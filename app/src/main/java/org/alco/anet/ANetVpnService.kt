@@ -97,9 +97,27 @@ class ANetVpnService : VpnService() {
         const val EXTRA_PROBE_NAMES = "probe_names"
         const val EXTRA_PROBE_STATUSES = "probe_statuses"
         const val EXTRA_PROBE_RTTS = "probe_rtts"
+        const val EXTRA_PROBE_FULL_RTTS = "probe_full_rtts"
         const val EXTRA_PROBE_REACHABLES = "probe_reachables"
         const val EXTRA_PROBE_TOTALS = "probe_totals"
         const val EXTRA_PROBE_PROTOS = "probe_protos"
+        const val EXTRA_PROBE_IS_CHECKING = "probe_is_checking"
+        const val EXTRA_PROBE_COMPLETED = "probe_completed"
+        const val EXTRA_PROBE_TOTAL_NODES = "probe_total_nodes"
+
+        @Volatile var cachedAccountGroup: String = ""
+        @Volatile var cachedAccountExpires: String = ""
+        @Volatile var cachedAccountTraffic: String = ""
+        @Volatile var cachedAccountSpeed: String = ""
+        @Volatile var cachedAccountSessions: String = ""
+
+        @Volatile var cachedRxCurve: FloatArray = FloatArray(0)
+        @Volatile var cachedTxCurve: FloatArray = FloatArray(0)
+        @Volatile var cachedRxSpeedStr: String = ""
+        @Volatile var cachedTxSpeedStr: String = ""
+        @Volatile var cachedTotalRxStr: String = ""
+        @Volatile var cachedTotalTxStr: String = ""
+        @Volatile var cachedRttMs: Long = -1L
 
         const val STATE_DISCONNECTED = 0
         const val STATE_CONNECTING = 1
@@ -525,6 +543,21 @@ class ANetVpnService : VpnService() {
         limit: String,
         expires: String
     ) {
+        cachedAccountGroup = "$billing • $group"
+        cachedAccountExpires = expires
+        cachedAccountTraffic = "$consumed\n/ $limit"
+        cachedAccountSpeed = speed
+        cachedAccountSessions = sessions
+        try {
+            getSharedPreferences("anet_prefs", Context.MODE_PRIVATE).edit()
+                .putString("acc_group_cached", cachedAccountGroup)
+                .putString("acc_expires_cached", cachedAccountExpires)
+                .putString("acc_traffic_cached", cachedAccountTraffic)
+                .putString("acc_speed_cached", cachedAccountSpeed)
+                .putString("acc_sessions_cached", cachedAccountSessions)
+                .apply()
+        } catch (_: Exception) {}
+
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra("is_account_info", true)
             putExtra("billing", billing)
@@ -599,6 +632,14 @@ class ANetVpnService : VpnService() {
         txCurve: FloatArray
     ) {
         renewWakeLock(force = false)
+        cachedRxCurve = rxCurve
+        cachedTxCurve = txCurve
+        cachedRxSpeedStr = rxSpeedStr
+        cachedTxSpeedStr = txSpeedStr
+        cachedTotalRxStr = totalRxStr
+        cachedTotalTxStr = totalTxStr
+        if (rttMs > 0L) cachedRttMs = rttMs
+
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra(EXTRA_IS_TELEMETRY, true)
             putExtra(EXTRA_TEL_RX_BPS, rxBps)
@@ -623,9 +664,13 @@ class ANetVpnService : VpnService() {
         names: Array<String>,
         statuses: IntArray,
         rtts: IntArray,
+        fullRtts: IntArray,
         reachables: IntArray,
         totals: IntArray,
-        protos: Array<String>
+        protos: Array<String>,
+        isChecking: Boolean,
+        completedNodes: Int,
+        totalNodes: Int
     ) {
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra(EXTRA_IS_NODE_PROBE, true)
@@ -633,9 +678,13 @@ class ANetVpnService : VpnService() {
             putExtra(EXTRA_PROBE_NAMES, names)
             putExtra(EXTRA_PROBE_STATUSES, statuses)
             putExtra(EXTRA_PROBE_RTTS, rtts)
+            putExtra(EXTRA_PROBE_FULL_RTTS, fullRtts)
             putExtra(EXTRA_PROBE_REACHABLES, reachables)
             putExtra(EXTRA_PROBE_TOTALS, totals)
             putExtra(EXTRA_PROBE_PROTOS, protos)
+            putExtra(EXTRA_PROBE_IS_CHECKING, isChecking)
+            putExtra(EXTRA_PROBE_COMPLETED, completedNodes)
+            putExtra(EXTRA_PROBE_TOTAL_NODES, totalNodes)
             setPackage(packageName)
         }
         sendBroadcast(intent)
@@ -655,6 +704,8 @@ class ANetVpnService : VpnService() {
 
     private fun stopVpnInternal() {
         isServiceRunning = false
+        cachedRxCurve = FloatArray(0)
+        cachedTxCurve = FloatArray(0)
         releaseLocks()
         unregisterNetworkCallback()
         closeTun()

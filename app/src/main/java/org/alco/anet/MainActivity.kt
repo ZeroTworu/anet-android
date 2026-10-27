@@ -82,6 +82,7 @@ data class NodeProbeEntry(
     val groupName: String,
     val status: Int,
     val bestRttMs: Int,
+    val fullRttMs: Int,
     val reachableEndpoints: Int,
     val totalEndpoints: Int,
     val protocolsText: String
@@ -101,8 +102,18 @@ data class NodeProbeEntry(
     }
 
     fun badgeLabel(): String = when (status) {
-        STATUS_AVAILABLE -> if (bestRttMs >= 0) "$bestRttMs мс" else "OK"
-        STATUS_DEGRADED -> if (bestRttMs >= 0) "~$bestRttMs мс ($reachableEndpoints/$totalEndpoints)" else "частично ($reachableEndpoints/$totalEndpoints)"
+        STATUS_AVAILABLE -> when {
+            fullRttMs >= 0 && bestRttMs >= 0 -> "${maxOf(fullRttMs, bestRttMs)} / $bestRttMs мс"
+            bestRttMs >= 0 -> "$bestRttMs мс"
+            fullRttMs >= 0 -> "$fullRttMs мс"
+            else -> "OK"
+        }
+        STATUS_DEGRADED -> when {
+            fullRttMs >= 0 && bestRttMs >= 0 -> "~${maxOf(fullRttMs, bestRttMs)} / $bestRttMs мс ($reachableEndpoints/$totalEndpoints)"
+            bestRttMs >= 0 -> "~$bestRttMs мс ($reachableEndpoints/$totalEndpoints)"
+            fullRttMs >= 0 -> "~$fullRttMs мс ($reachableEndpoints/$totalEndpoints)"
+            else -> "частично ($reachableEndpoints/$totalEndpoints)"
+        }
         STATUS_UNAVAILABLE -> "недоступен"
         else -> "..."
     }
@@ -163,8 +174,17 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var serverSelectContainer: LinearLayout
     private lateinit var serverSelectTextView: TextView
+    private lateinit var tvSelectedServerRtt: TextView
     private lateinit var serverIndicator: ImageView
     private lateinit var serverSelectIcon: ImageView
+    private lateinit var nodeProbeProgressContainer: LinearLayout
+    private lateinit var pbNodeProbe: ProgressBar
+    private lateinit var tvNodeProbeProgress: TextView
+    private var isNodeProbing: Boolean = false
+    private var nodeProbeCompleted: Int = 0
+    private var nodeProbeTotal: Int = 0
+    private var tvDialogProbeStatus: TextView? = null
+    private var hasNativeTelemetryCurve: Boolean = false
     private var activeErrorDialog: AlertDialog? = null
 
     private lateinit var versionInfoContainer: LinearLayout
@@ -681,8 +701,12 @@ class MainActivity : AppCompatActivity() {
 
         serverSelectContainer = findViewById(R.id.serverSelectContainer)
         serverSelectTextView = findViewById(R.id.serverSelectTextView)
+        tvSelectedServerRtt = findViewById(R.id.tvSelectedServerRtt)
         serverIndicator = findViewById(R.id.serverIndicator)
         serverSelectIcon = findViewById(R.id.serverSelectIcon)
+        nodeProbeProgressContainer = findViewById(R.id.nodeProbeProgressContainer)
+        pbNodeProbe = findViewById(R.id.pbNodeProbe)
+        tvNodeProbeProgress = findViewById(R.id.tvNodeProbeProgress)
 
         versionInfoContainer = findViewById(R.id.versionInfoContainer)
         tvVpnEventStatus = findViewById(R.id.tvVpnEventStatus)
@@ -772,13 +796,8 @@ class MainActivity : AppCompatActivity() {
         )
         safeStartConnectivityMonitor()
 
-        if (lastAccountGroup.isNotEmpty()) {
-            findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
-            findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
-            findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
-            findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
-            findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
-        }
+        // Восстанавливаем блок аккаунта (из savedInstanceState, ANetVpnService или SharedPreferences)
+        restoreAccountInfoUi()
 
         if (lastVpnEventText.isNotEmpty()) {
             tvVpnEventStatus.text = lastVpnEventText
@@ -2886,14 +2905,31 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, 12.dpToPx())
         }
 
+        val titleCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
         val titleView = TextView(this).apply {
             text = "Выберите точку подключения"
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
         }
-        headerLayout.addView(titleView)
+        val probeSubView = TextView(this).apply {
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextColor(Color.parseColor("#38C976"))
+            setPadding(0, 2.dpToPx(), 0, 0)
+            if (isNodeProbing && nodeProbeTotal > 0) {
+                visibility = View.VISIBLE
+                text = "ПРОВЕРКА УЗЛОВ ${nodeProbeCompleted.coerceAtMost(nodeProbeTotal)}/$nodeProbeTotal"
+            } else {
+                visibility = View.GONE
+            }
+        }
+        tvDialogProbeStatus = probeSubView
+        titleCol.addView(titleView)
+        titleCol.addView(probeSubView)
+        headerLayout.addView(titleCol)
         rootLayout.addView(headerLayout)
 
         val scrollView = android.widget.ScrollView(this).apply {
@@ -2914,6 +2950,11 @@ class MainActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setView(rootLayout)
             .setCancelable(true)
+            .setOnDismissListener {
+                if (tvDialogProbeStatus === probeSubView) {
+                    tvDialogProbeStatus = null
+                }
+            }
             .create()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
 
@@ -3049,20 +3090,7 @@ class MainActivity : AppCompatActivity() {
                 val consumed = intent.getStringExtra("consumed") ?: "—"
                 val limit = intent.getStringExtra("limit") ?: "—"
                 val expires = intent.getStringExtra("expires") ?: "—"
-
-                lastAccountGroup = "$billing • $group"
-                lastAccountExpires = expires
-                lastAccountTraffic = "$consumed\n/ $limit"
-                lastAccountSpeed = speed
-                lastAccountSessions = sessions
-
-                runOnUiThread {
-                    findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
-                    findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
-                    findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
-                    findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
-                    findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
-                }
+                applyAccountInfoState(billing, group, sessions, speed, consumed, limit, expires)
                 return
             }
 
@@ -3087,10 +3115,26 @@ class MainActivity : AppCompatActivity() {
                 val names = intent.getStringArrayExtra(ANetVpnService.EXTRA_PROBE_NAMES) ?: emptyArray()
                 val statuses = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_STATUSES) ?: IntArray(0)
                 val rtts = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_RTTS) ?: IntArray(0)
+                val fullRtts = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_FULL_RTTS) ?: IntArray(0)
                 val reachables = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_REACHABLES) ?: IntArray(0)
                 val totals = intent.getIntArrayExtra(ANetVpnService.EXTRA_PROBE_TOTALS) ?: IntArray(0)
                 val protos = intent.getStringArrayExtra(ANetVpnService.EXTRA_PROBE_PROTOS) ?: emptyArray()
-                applyNodeProbeSnapshot(ids, names, statuses, rtts, reachables, totals, protos)
+                val isChecking = intent.getBooleanExtra(ANetVpnService.EXTRA_PROBE_IS_CHECKING, false)
+                val completedNodes = intent.getIntExtra(ANetVpnService.EXTRA_PROBE_COMPLETED, 0)
+                val totalNodes = intent.getIntExtra(ANetVpnService.EXTRA_PROBE_TOTAL_NODES, 0)
+                applyNodeProbeSnapshot(
+                    ids,
+                    names,
+                    statuses,
+                    rtts,
+                    fullRtts,
+                    reachables,
+                    totals,
+                    protos,
+                    isChecking,
+                    completedNodes,
+                    totalNodes
+                )
                 return
             }
 
@@ -3258,6 +3302,7 @@ class MainActivity : AppCompatActivity() {
                     tvTx.text = "0 B/s"
                     tvRxm.text = "0 B"
                     tvTxm.text = "0 B"
+                    hasNativeTelemetryCurve = false
                     telemetrySparklineView.clearGraph()
                     if (wasConnected) {
                         requestConnectivityRecheck(silent = true)
@@ -3479,7 +3524,91 @@ class MainActivity : AppCompatActivity() {
             tvTx.text = txSpeed
             tvRxm.text = if (rxTotal.isNotBlank()) rxTotal else "0 B"
             tvTxm.text = if (txTotal.isNotBlank()) txTotal else "0 B"
-            telemetrySparklineView.pushFallbackSpeedSample(rxBps, txBps)
+            if (!hasNativeTelemetryCurve) {
+                telemetrySparklineView.pushFallbackSpeedSample(rxBps, txBps)
+            }
+        }
+    }
+
+    @Keep
+    fun onAccountInfo(
+        billing: String,
+        group: String,
+        sessions: String,
+        speed: String,
+        consumed: String,
+        limit: String,
+        expires: String
+    ) {
+        applyAccountInfoState(billing, group, sessions, speed, consumed, limit, expires)
+    }
+
+    private fun applyAccountInfoState(
+        billing: String,
+        group: String,
+        sessions: String,
+        speed: String,
+        consumed: String,
+        limit: String,
+        expires: String
+    ) {
+        lastAccountGroup = "$billing • $group"
+        lastAccountExpires = expires
+        lastAccountTraffic = "$consumed\n/ $limit"
+        lastAccountSpeed = speed
+        lastAccountSessions = sessions
+
+        ANetVpnService.cachedAccountGroup = lastAccountGroup
+        ANetVpnService.cachedAccountExpires = lastAccountExpires
+        ANetVpnService.cachedAccountTraffic = lastAccountTraffic
+        ANetVpnService.cachedAccountSpeed = lastAccountSpeed
+        ANetVpnService.cachedAccountSessions = lastAccountSessions
+
+        try {
+            getAppPrefs().edit()
+                .putString("acc_group_cached", lastAccountGroup)
+                .putString("acc_expires_cached", lastAccountExpires)
+                .putString("acc_traffic_cached", lastAccountTraffic)
+                .putString("acc_speed_cached", lastAccountSpeed)
+                .putString("acc_sessions_cached", lastAccountSessions)
+                .apply()
+        } catch (_: Exception) {}
+
+        runOnUiThread {
+            findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
+            findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
+            findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
+            findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
+            findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
+        }
+    }
+
+    private fun restoreAccountInfoUi() {
+        if (lastAccountGroup.isEmpty()) {
+            if (ANetVpnService.cachedAccountGroup.isNotEmpty()) {
+                lastAccountGroup = ANetVpnService.cachedAccountGroup
+                lastAccountExpires = ANetVpnService.cachedAccountExpires
+                lastAccountTraffic = ANetVpnService.cachedAccountTraffic
+                lastAccountSpeed = ANetVpnService.cachedAccountSpeed
+                lastAccountSessions = ANetVpnService.cachedAccountSessions
+            } else {
+                val prefs = getAppPrefs()
+                val savedGroup = prefs.getString("acc_group_cached", "").orEmpty()
+                if (savedGroup.isNotEmpty()) {
+                    lastAccountGroup = savedGroup
+                    lastAccountExpires = prefs.getString("acc_expires_cached", "Бессрочно").orEmpty()
+                    lastAccountTraffic = prefs.getString("acc_traffic_cached", "—\n/ —").orEmpty()
+                    lastAccountSpeed = prefs.getString("acc_speed_cached", "—").orEmpty()
+                    lastAccountSessions = prefs.getString("acc_sessions_cached", "—").orEmpty()
+                }
+            }
+        }
+        if (lastAccountGroup.isNotEmpty()) {
+            findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
+            findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
+            findViewById<TextView>(R.id.tvAccountTraffic)?.text = lastAccountTraffic
+            findViewById<TextView>(R.id.tvAccountSpeed)?.text = lastAccountSpeed
+            findViewById<TextView>(R.id.tvAccountSessions)?.text = lastAccountSessions
         }
     }
 
@@ -3545,11 +3674,27 @@ class MainActivity : AppCompatActivity() {
         names: Array<String>,
         statuses: IntArray,
         rtts: IntArray,
+        fullRtts: IntArray,
         reachables: IntArray,
         totals: IntArray,
-        protos: Array<String>
+        protos: Array<String>,
+        isChecking: Boolean,
+        completedNodes: Int,
+        totalNodes: Int
     ) {
-        applyNodeProbeSnapshot(ids, names, statuses, rtts, reachables, totals, protos)
+        applyNodeProbeSnapshot(
+            ids,
+            names,
+            statuses,
+            rtts,
+            fullRtts,
+            reachables,
+            totals,
+            protos,
+            isChecking,
+            completedNodes,
+            totalNodes
+        )
     }
 
     private fun normalizeProbeKey(raw: String): String {
@@ -3577,15 +3722,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshSelectedServerIndicator() {
+        val currentServer = availableServers.firstOrNull {
+            it.id == selectedServerName || it.name == selectedServerName
+        } ?: availableServers.firstOrNull()
+        val probe = currentServer?.let { findNodeProbe(it) }
+        val probeColor = probe?.badgeColor() ?: Color.parseColor("#9E9E9E")
+        val badgeText = probe?.badgeLabel() ?: "..."
+
+        tvSelectedServerRtt.text = badgeText
+        tvSelectedServerRtt.setTextColor(probeColor)
+
         if (currentUiState != State.DISCONNECTED) {
             serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#669D29"))
             return
         }
-        val currentServer = availableServers.firstOrNull {
-            it.id == selectedServerName || it.name == selectedServerName
-        } ?: availableServers.firstOrNull()
-        val probeColor = currentServer?.let { findNodeProbe(it)?.badgeColor() }
-            ?: Color.parseColor("#9E9E9E")
         serverIndicator.imageTintList = ColorStateList.valueOf(probeColor)
     }
 
@@ -3594,9 +3744,13 @@ class MainActivity : AppCompatActivity() {
         names: Array<String>,
         statuses: IntArray,
         rtts: IntArray,
+        fullRtts: IntArray,
         reachables: IntArray,
         totals: IntArray,
-        protos: Array<String>
+        protos: Array<String>,
+        isChecking: Boolean,
+        completedNodes: Int,
+        totalNodes: Int
     ) {
         val count = minOf(
             ids.size,
@@ -3609,23 +3763,45 @@ class MainActivity : AppCompatActivity() {
         )
         val updated = ArrayList<NodeProbeEntry>(count)
         for (i in 0 until count) {
+            val fullVal = if (i < fullRtts.size) fullRtts[i] else rtts[i]
             updated.add(
                 NodeProbeEntry(
                     groupId = ids[i],
                     groupName = names[i],
                     status = statuses[i],
                     bestRttMs = rtts[i],
+                    fullRttMs = fullVal,
                     reachableEndpoints = reachables[i],
                     totalEndpoints = totals[i],
                     protocolsText = protos[i]
                 )
             )
         }
+        isNodeProbing = isChecking
+        nodeProbeCompleted = completedNodes
+        nodeProbeTotal = totalNodes
+
         runOnUiThread {
             nodeProbeEntries.clear()
             nodeProbeEntries.addAll(updated)
             refreshSelectedServerIndicator()
             serverDropdownAdapter?.notifyDataSetChanged()
+
+            if (isChecking && totalNodes > 0) {
+                val safeDone = completedNodes.coerceIn(0, totalNodes)
+                nodeProbeProgressContainer.visibility = View.VISIBLE
+                pbNodeProbe.max = totalNodes.coerceAtLeast(1)
+                pbNodeProbe.progress = safeDone.coerceAtLeast(1)
+                val label = "ПРОВЕРКА УЗЛОВ $safeDone/$totalNodes"
+                tvNodeProbeProgress.text = label
+                tvDialogProbeStatus?.apply {
+                    visibility = View.VISIBLE
+                    text = label
+                }
+            } else {
+                nodeProbeProgressContainer.visibility = View.GONE
+                tvDialogProbeStatus?.visibility = View.GONE
+            }
         }
     }
 
@@ -3710,8 +3886,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (rxCurve.isNotEmpty() || txCurve.isNotEmpty()) {
+                hasNativeTelemetryCurve = true
                 telemetrySparklineView.setCurves(rxCurve, txCurve)
-            } else {
+            } else if (!hasNativeTelemetryCurve) {
                 telemetrySparklineView.pushFallbackSpeedSample(rxBps.toDouble(), txBps.toDouble())
             }
         }
@@ -4022,9 +4199,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        safeStartConnectivityMonitor()
+        restoreAccountInfoUi()
         val stateCode = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
         handleVpnState(stateCode, "", getVpnServerName())
+        if (ANetVpnService.isServiceRunning && (ANetVpnService.cachedRxCurve.isNotEmpty() || ANetVpnService.cachedTxCurve.isNotEmpty())) {
+            hasNativeTelemetryCurve = true
+            telemetrySparklineView.setCurves(ANetVpnService.cachedRxCurve, ANetVpnService.cachedTxCurve)
+            if (ANetVpnService.cachedRxSpeedStr.isNotBlank()) tvRx.text = ANetVpnService.cachedRxSpeedStr
+            if (ANetVpnService.cachedTxSpeedStr.isNotBlank()) tvTx.text = ANetVpnService.cachedTxSpeedStr
+            if (ANetVpnService.cachedTotalRxStr.isNotBlank()) tvRxm.text = ANetVpnService.cachedTotalRxStr
+            if (ANetVpnService.cachedTotalTxStr.isNotBlank()) tvTxm.text = ANetVpnService.cachedTotalTxStr
+        }
+        safeStartConnectivityMonitor()
 
         if (isScanningQr) {
             isScanningQr = false

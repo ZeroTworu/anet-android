@@ -261,7 +261,7 @@
         android:layout_height="wrap_content"
         android:layout_marginLeft="16dp"
         android:layout_marginRight="16dp"
-        android:layout_marginBottom="6dp"
+        android:layout_marginBottom="4dp"
         android:background="@drawable/linear_radius"
         android:clickable="true"
         android:focusable="true"
@@ -269,7 +269,7 @@
         android:orientation="horizontal"
         android:paddingHorizontal="12dp"
         android:paddingVertical="10dp"
-        app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
+        app:layout_constraintBottom_toTopOf="@+id/nodeProbeProgressContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/buttonAndSpinnerLayout">
@@ -295,12 +295,61 @@
             android:textStyle="bold"
             tools:text="Server 1" />
 
+        <TextView
+            android:id="@+id/tvSelectedServerRtt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="..."
+            android:textColor="#787C84"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
         <ImageView
             android:id="@+id/serverSelectIcon"
             android:layout_width="22dp"
             android:layout_height="22dp"
             android:src="@drawable/chevron_down" />
 
+    </LinearLayout>
+
+    <!-- Индикатор прогресса проверки узлов: ПРОВЕРКА УЗЛОВ X/Y -->
+    <LinearLayout
+        android:id="@+id/nodeProbeProgressContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="22dp"
+        android:layout_marginBottom="4dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@+id/buildInfoBlock"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer">
+
+        <ProgressBar
+            android:id="@+id/pbNodeProbe"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:max="100"
+            android:progress="10"
+            android:progressBackgroundTint="#262A36"
+            android:progressTint="#38C976" />
+
+        <TextView
+            android:id="@+id/tvNodeProbeProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.06"
+            android:text="ПРОВЕРКА УЗЛОВ 0/0"
+            android:textColor="#9E9EA6"
+            android:textSize="9sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Блок информации о сборке / Статус события -->
@@ -316,7 +365,7 @@
         android:paddingHorizontal="10dp"
         android:paddingVertical="6dp"
         app:layout_constraintBottom_toTopOf="@+id/statsContainer"
-        app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer">
+        app:layout_constraintTop_toBottomOf="@+id/nodeProbeProgressContainer">
 
         <!-- Контейнер для версий (показывается только при DISCONNECTED) -->
         <LinearLayout
