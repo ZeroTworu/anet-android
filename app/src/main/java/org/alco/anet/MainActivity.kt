@@ -244,6 +244,7 @@ class MainActivity : AppCompatActivity() {
     private external fun initLogger()
     private external fun startConnectivityMonitor(config: String)
     private external fun triggerConnectivityCheck()
+    private external fun triggerNodeProbe()
 
     enum class State { DISCONNECTED, CONNECTING, CONNECTED }
 
@@ -709,8 +710,7 @@ class MainActivity : AppCompatActivity() {
 
         btnRefreshNodes.setupTvFocusAnimator()
         btnRefreshNodes.setOnClickListener {
-            btnRefreshNodes.animate().rotationBy(360f).setDuration(450).start()
-            requestConnectivityRecheck(silent = false)
+            requestNodeProbeRecheck()
         }
         nodeProbeProgressContainer = findViewById(R.id.nodeProbeProgressContainer)
         pbNodeProbe = findViewById(R.id.pbNodeProbe)
@@ -3931,6 +3931,18 @@ class MainActivity : AppCompatActivity() {
             startKotlinFallbackProber()
         } catch (e: Exception) {
             Log.e("ANet", "Failed to start connectivity monitor: ${e.message}")
+        }
+    }
+
+    private fun requestNodeProbeRecheck() {
+        btnRefreshNodes.animate().rotationBy(360f).setDuration(450).start()
+        logToConsole("Запущена перепроверка доступности узлов VPN…")
+        try {
+            triggerNodeProbe()
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w("ANet", "Native triggerNodeProbe unavailable: ${e.message}")
+        } catch (e: Exception) {
+            Log.e("ANet", "Failed to trigger node probe: ${e.message}")
         }
     }
 
