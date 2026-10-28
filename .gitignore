@@ -15,3 +15,4 @@ jniLibs/
 /app/keystore/*.jks
 process_files.ps1
 project_report.txt
+.kotlin
