@@ -181,6 +181,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nodeProbeProgressContainer: LinearLayout
     private lateinit var pbNodeProbe: ProgressBar
     private lateinit var tvNodeProbeProgress: TextView
+    private lateinit var tvAppToast: TextView
+    private val hideAppToastRunnable = Runnable {
+        if (::tvAppToast.isInitialized) {
+            tvAppToast.visibility = View.GONE
+        }
+    }
     private var isNodeProbing: Boolean = false
     private var nodeProbeCompleted: Int = 0
     private var nodeProbeTotal: Int = 0
@@ -715,6 +721,12 @@ class MainActivity : AppCompatActivity() {
         nodeProbeProgressContainer = findViewById(R.id.nodeProbeProgressContainer)
         pbNodeProbe = findViewById(R.id.pbNodeProbe)
         tvNodeProbeProgress = findViewById(R.id.tvNodeProbeProgress)
+        tvAppToast = findViewById(R.id.tvAppToast)
+        tvAppToast.background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 8f * resources.displayMetrics.density
+            setColor(Color.rgb(255, 185, 0))
+        }
+        updateShieldIcon()
 
         versionInfoContainer = findViewById(R.id.versionInfoContainer)
         tvVpnEventStatus = findViewById(R.id.tvVpnEventStatus)
@@ -3280,6 +3292,7 @@ class MainActivity : AppCompatActivity() {
     private fun setUiState(state: State, customStatusText: String? = null) {
         runOnUiThread {
             currentUiState = state
+            updateShieldIcon()
             val controlsEnabled = state == State.DISCONNECTED
             btnCheckUpdate.isEnabled = controlsEnabled && !isCheckingUpdates
             btnSettings.isEnabled = controlsEnabled && !isCheckingUpdates
@@ -3856,7 +3869,7 @@ class MainActivity : AppCompatActivity() {
                 PulseLineView.PULSE_YELLOW -> PulseLineView.COLOR_YELLOW
                 else -> PulseLineView.COLOR_GREEN
             }
-            connectivityBadgeDot.imageTintList = ColorStateList.valueOf(activeColor)
+            updateShieldIcon()
             tvConnectivityTitle.text = lastConnTitle
             tvConnectivitySubtitle.text = lastConnSubtitle
             if (currentUiState == State.CONNECTED) {
@@ -3934,10 +3947,182 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showAppToast(message: String) {
+        runOnUiThread {
+            if (!::tvAppToast.isInitialized) return@runOnUiThread
+            mainHandler.removeCallbacks(hideAppToastRunnable)
+            tvAppToast.text = message
+            tvAppToast.visibility = View.VISIBLE
+            mainHandler.postDelayed(hideAppToastRunnable, 2500L)
+        }
+    }
+
+    private fun computeShieldPulseColor(): Int {
+        return when (currentUiState) {
+            State.DISCONNECTED -> PulseLineView.PULSE_RED
+            State.CONNECTING -> PulseLineView.PULSE_YELLOW
+            State.CONNECTED -> {
+                if (lastConnCondition == 5 || lastConnGlobalOk > 0) {
+                    PulseLineView.PULSE_GREEN
+                } else {
+                    PulseLineView.PULSE_YELLOW
+                }
+            }
+        }
+    }
+
+    private fun updateShieldIcon() {
+        if (!::connectivityBadgeDot.isInitialized) return
+        val shieldColorCode = computeShieldPulseColor()
+        connectivityBadgeDot.imageTintList = null
+        connectivityBadgeDot.setImageDrawable(createShieldDrawable(shieldColorCode))
+    }
+
+    private fun createShieldDrawable(pulseColorCode: Int): android.graphics.drawable.Drawable {
+        val density = resources.displayMetrics.density
+        val sizePx = (16f * density).toInt().coerceAtLeast(16)
+        val strokeColor = when (pulseColorCode) {
+            PulseLineView.PULSE_RED -> Color.rgb(239, 68, 68)
+            PulseLineView.PULSE_YELLOW -> Color.rgb(245, 158, 11)
+            else -> Color.rgb(34, 197, 94)
+        }
+        val fillColor = Color.argb(
+            40,
+            Color.red(strokeColor),
+            Color.green(strokeColor),
+            Color.blue(strokeColor)
+        )
+        return object : android.graphics.drawable.Drawable() {
+            private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.FILL
+                color = fillColor
+            }
+            private val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 1.35f * density
+                strokeJoin = android.graphics.Paint.Join.ROUND
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                color = strokeColor
+            }
+            private val markPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 1.55f * density
+                strokeJoin = android.graphics.Paint.Join.ROUND
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                color = strokeColor
+            }
+            private val dotPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.FILL
+                color = strokeColor
+            }
+
+            override fun getIntrinsicWidth(): Int = sizePx
+            override fun getIntrinsicHeight(): Int = sizePx
+
+            override fun draw(canvas: android.graphics.Canvas) {
+                val b = bounds
+                val w = b.width().toFloat()
+                val h = b.height().toFloat()
+                if (w <= 0f || h <= 0f) return
+
+                val cx = b.exactCenterX()
+                val cy = b.exactCenterY()
+                val top = b.top + 1.0f * density
+                val bot = b.bottom - 1.0f * density
+                val left = b.left + 1.5f * density
+                val right = b.right - 1.5f * density
+                val midY = top + (bot - top) * 0.55f
+
+                val path = android.graphics.Path().apply {
+                    moveTo(cx, top)
+                    lineTo(right, top + 2.5f * density)
+                    lineTo(right - 1.0f * density, midY)
+                    lineTo(cx, bot)
+                    lineTo(left + 1.0f * density, midY)
+                    lineTo(left, top + 2.5f * density)
+                    close()
+                }
+                canvas.drawPath(path, fillPaint)
+                canvas.drawPath(path, strokePaint)
+
+                when (pulseColorCode) {
+                    PulseLineView.PULSE_GREEN -> {
+                        canvas.drawLine(
+                            cx - 2.6f * density,
+                            cy + 0.2f * density,
+                            cx - 0.6f * density,
+                            cy + 2.2f * density,
+                            markPaint
+                        )
+                        canvas.drawLine(
+                            cx - 0.6f * density,
+                            cy + 2.2f * density,
+                            cx + 3.0f * density,
+                            cy - 2.0f * density,
+                            markPaint
+                        )
+                    }
+                    PulseLineView.PULSE_YELLOW -> {
+                        canvas.drawLine(
+                            cx,
+                            cy - 2.8f * density,
+                            cx,
+                            cy + 0.6f * density,
+                            markPaint
+                        )
+                        canvas.drawCircle(cx, cy + 2.6f * density, 0.95f * density, dotPaint)
+                    }
+                    else -> {
+                        canvas.drawLine(
+                            cx - 2.2f * density,
+                            cy - 2.2f * density,
+                            cx + 2.2f * density,
+                            cy + 2.2f * density,
+                            markPaint
+                        )
+                        canvas.drawLine(
+                            cx + 2.2f * density,
+                            cy - 2.2f * density,
+                            cx - 2.2f * density,
+                            cy + 2.2f * density,
+                            markPaint
+                        )
+                    }
+                }
+            }
+
+            override fun setAlpha(alpha: Int) {
+                fillPaint.alpha = alpha
+                strokePaint.alpha = alpha
+                markPaint.alpha = alpha
+                dotPaint.alpha = alpha
+            }
+
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+                fillPaint.colorFilter = colorFilter
+                strokePaint.colorFilter = colorFilter
+                markPaint.colorFilter = colorFilter
+                dotPaint.colorFilter = colorFilter
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
     private fun requestNodeProbeRecheck() {
         btnRefreshNodes.animate().rotationBy(360f).setDuration(450).start()
+        showAppToast("Проверка узлов...")
+        val estTotal = nodeProbeTotal.takeIf { it > 0 } ?: availableServers.size.coerceAtLeast(1)
+        nodeProbeProgressContainer.visibility = View.VISIBLE
+        pbNodeProbe.max = estTotal
+        pbNodeProbe.progress = 1
+        tvNodeProbeProgress.text = "ПРОВЕРКА УЗЛОВ 0/$estTotal"
         logToConsole("Запущена перепроверка доступности узлов VPN…")
         try {
+            if (nodeProbeTotal <= 0 && !selectedConfigContent.isNullOrBlank()) {
+                inspectConfig(selectedConfigContent!!)
+            }
             triggerNodeProbe()
         } catch (e: UnsatisfiedLinkError) {
             Log.w("ANet", "Native triggerNodeProbe unavailable: ${e.message}")
@@ -3949,6 +4134,7 @@ class MainActivity : AppCompatActivity() {
     private fun requestConnectivityRecheck(silent: Boolean) {
         if (!silent) {
             btnRecheckConnectivity.animate().rotationBy(360f).setDuration(450).start()
+            showAppToast("Проверка маршрутов...")
             tvConnectivityTitle.text = "Сверяем показания приборов…"
             tvConnectivitySubtitle.text = "Опрашиваем контрольные точки маршрутизации…"
             logToConsole("Запущена внеплановая проверка маршрутов…")
