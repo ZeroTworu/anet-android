@@ -56,6 +56,14 @@ class AppSelectionActivity : AppCompatActivity() {
             selectedApps.addAll(it)
         }
 
+        btnSave.isFocusable = true
+        btnSave.setOnFocusChangeListener { v, hasFocus ->
+            v.animate()
+                .scaleX(if (hasFocus) 1.08f else 1.0f)
+                .scaleY(if (hasFocus) 1.08f else 1.0f)
+                .setDuration(150)
+                .start()
+        }
         btnSave.setOnClickListener {
             // Сохраняем в Preferences
             prefs.edit().putStringSet("allowed_apps", selectedApps).apply()
@@ -70,7 +78,8 @@ class AppSelectionActivity : AppCompatActivity() {
         val pm = packageManager
 
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val packages = pm.queryIntentActivities(launcherIntent, 0)
+        val leanbackIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+        val packages = (pm.queryIntentActivities(launcherIntent, 0) + pm.queryIntentActivities(leanbackIntent, 0))
             .map { it.activityInfo.packageName }
             .distinct()
 

@@ -27,6 +27,7 @@ import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.BaseAdapter
@@ -48,12 +49,14 @@ import androidx.annotation.Keep
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -240,6 +243,7 @@ class MainActivity : AppCompatActivity() {
     private external fun getPendingTag(): String
     private external fun getPendingBody(): String
     private external fun inspectConfig(config: String): String
+    private external fun fetchConfigFromUrl(url: String): String
     private external fun getVpnStateCode(): Int
     private external fun getVpnServerName(): String
     private external fun clearUiCallback()
@@ -529,6 +533,64 @@ class MainActivity : AppCompatActivity() {
         logToConsole("Правила [routing.overrides] успешно сохранены")
     }
 
+    private fun installApk() {
+        try {
+            val apkFile = File(cacheDir, "update.apk")
+            val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", apkFile)
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            logToConsole("Ошибка запуска установщика APK: ${e.message}")
+        }
+    }
+
+    private fun showUpdateModal(version: String, body: String) {
+        runOnUiThread {
+            if (updateDialog?.isShowing == true) return@runOnUiThread
+
+            val builder = AlertDialog.Builder(this)
+            val dialogView = layoutInflater.inflate(R.layout.dialog_update, null)
+
+            val versionView = dialogView.findViewById<TextView>(R.id.updateVersion)
+            val changelogView = dialogView.findViewById<TextView>(R.id.updateChangelog)
+            val btnUpdate = dialogView.findViewById<Button>(R.id.btnUpdateNow)
+            val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelUpdate)
+
+            btnCancel.setupTvFocusAnimator()
+            btnUpdate.setupTvFocusAnimator()
+
+            progressBar = dialogView.findViewById<ProgressBar>(R.id.updateProgress)
+
+            versionView.text = "Version: $version"
+            changelogView.text = body
+
+            builder.setView(dialogView)
+            builder.setCancelable(false)
+
+            updateDialog = builder.create()
+            updateDialog?.show()
+
+            btnCancel.setOnClickListener {
+                updateDialog?.dismiss()
+            }
+
+            btnUpdate.setOnClickListener {
+                btnUpdate.isEnabled = false
+                btnCancel.isEnabled = false
+                progressBar?.visibility = View.VISIBLE
+
+                logToConsole("Starting APK download...")
+                val destination = File(cacheDir, "update.apk").absolutePath
+                startDownload(destination)
+            }
+        }
+    }
+
     // --- СКАЧИВАНИЕ И АВТООБНОВЛЕНИЕ СЕРВЕРНОГО КОНФИГА ---
 
     private fun fetchServerConfigFromUrl(
@@ -546,22 +608,36 @@ class MainActivity : AppCompatActivity() {
             val maxRedirects = 5
             var content: String? = null
 
+            // Приоритетная загрузка через Rust http_help.rs (BrowserProfile + BoringSSL мимикрия)
+            try {
+                val nativeRes = fetchConfigFromUrl(normalized)
+                if (nativeRes.startsWith("OK\n")) {
+                    content = nativeRes.substringAfter("OK\n")
+                }
+            } catch (e: UnsatisfiedLinkError) {
+                Log.w("ANet", "Native fetchConfigFromUrl unavailable, falling back: ${e.message}")
+            } catch (e: Exception) {
+                Log.w("ANet", "Native fetchConfigFromUrl failed, falling back: ${e.message}")
+            }
+
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
                 override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
                 override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
                 override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
             })
 
-            try {
-                val sc = SSLContext.getInstance("TLS")
-                sc.init(null, trustAllCerts, SecureRandom())
-                HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
-                HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
-            } catch (e: Exception) {
-                Log.e("ANet", "SSL TrustAll setup failed: ${e.message}")
+            if (content.isNullOrBlank()) {
+                try {
+                    val sc = SSLContext.getInstance("TLS")
+                    sc.init(null, trustAllCerts, SecureRandom())
+                    HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
+                    HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
+                } catch (e: Exception) {
+                    Log.e("ANet", "SSL TrustAll setup failed: ${e.message}")
+                }
             }
 
-            while (redirectsCount < maxRedirects) {
+            while (content.isNullOrBlank() && redirectsCount < maxRedirects) {
                 var connection: HttpURLConnection? = null
                 try {
                     val urlObj = URL(currentUrl)
@@ -572,9 +648,9 @@ class MainActivity : AppCompatActivity() {
                     connection.instanceFollowRedirects = false
                     connection.setRequestProperty(
                         "User-Agent",
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ANet-Client"
+                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
                     )
-                    connection.setRequestProperty("Accept", "*/*")
+                    connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
                     val status = connection.responseCode
 
@@ -851,6 +927,27 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
+        if (isTvDevice()) {
+            connectButton.post { connectButton.requestFocus() }
+        }
+
+        handleIntent(intent)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+            val focused = currentFocus
+            if (focused != null && focused !is EditText) {
+                focused.performClick()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 
@@ -979,7 +1076,7 @@ class MainActivity : AppCompatActivity() {
 
         btnFileConfig.setOnClickListener {
             dialog.dismiss()
-            filePickerLauncher.launch(arrayOf("*/*"))
+            launchFilePickerSafe()
         }
 
         btnOk.setOnClickListener {
@@ -1255,7 +1352,7 @@ class MainActivity : AppCompatActivity() {
             isFocusable = true
             setupTvFocusAnimator()
             setOnClickListener {
-                filePickerLauncher.launch(arrayOf("*/*"))
+                launchFilePickerSafe()
             }
         }
 
@@ -1450,6 +1547,7 @@ class MainActivity : AppCompatActivity() {
                         layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
                             setMargins(12.dpToPx(), 0, 12.dpToPx(), 0)
                         }
+                        setupTvFocusAnimator()
                         setOnClickListener {
                             val savedUrl = getSavedServerUrl()
                             if (!savedUrl.isNullOrBlank()) {
@@ -1468,6 +1566,7 @@ class MainActivity : AppCompatActivity() {
                         layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
                             setMargins(12.dpToPx(), 0, 12.dpToPx(), 0)
                         }
+                        setupTvFocusAnimator()
                         setOnClickListener {
                             showRenameDialog(item) {
                                 populateList()
@@ -1483,6 +1582,7 @@ class MainActivity : AppCompatActivity() {
                     setBackgroundColor(Color.TRANSPARENT)
                     val iconSize = 22.dpToPx()
                     layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+                    setupTvFocusAnimator()
                     setOnClickListener {
                         if (isVpnConnected && isActive) {
                             Toast.makeText(this@MainActivity, "Нельзя удалить активный конфиг", Toast.LENGTH_SHORT).show()
@@ -2013,9 +2113,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val btnTabDirect = Button(this)
-        val btnTabBlock = Button(this)
-        val btnTabProxy = Button(this)
+        val btnTabDirect = Button(this).apply { setupTvFocusAnimator() }
+        val btnTabBlock = Button(this).apply { setupTvFocusAnimator() }
+        val btnTabProxy = Button(this).apply { setupTvFocusAnimator() }
 
         val tvHint = TextView(this).apply {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
@@ -2190,6 +2290,7 @@ class MainActivity : AppCompatActivity() {
                         setBackgroundColor(Color.TRANSPARENT)
                         val iconSize = 20.dpToPx()
                         layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+                        setupTvFocusAnimator()
                         setOnClickListener {
                             currentItems.removeAt(index)
                             updateTabsAndList()
@@ -2539,6 +2640,19 @@ class MainActivity : AppCompatActivity() {
                 isScanningQr = false
                 Toast.makeText(this, "Ошибка QR-сканера: ${e.message}", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun launchFilePickerSafe() {
+        try {
+            filePickerLauncher.launch(arrayOf("*/*"))
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Системный файловый менеджер недоступен на этом устройстве. Используйте ссылку или QR.",
+                Toast.LENGTH_LONG
+            ).show()
+            logToConsole("Не удалось открыть файловый менеджер: ${e.message}")
+        }
     }
 
     private val filePickerLauncher = registerForActivityResult(
@@ -3191,6 +3305,31 @@ class MainActivity : AppCompatActivity() {
             }
 
             val status = intent?.getStringExtra("status") ?: return
+
+            if (status.contains("Найдено обновление") ||
+                status.contains("актуальная версия") ||
+                status.contains("Ошибка обновления")
+            ) {
+                isCheckingUpdates = false
+                btnCheckUpdate.isEnabled = currentUiState == State.DISCONNECTED
+                btnSettings.isEnabled = currentUiState == State.DISCONNECTED
+                btnCheckUpdate.alpha = if (btnCheckUpdate.isEnabled) 1.0f else 0.3f
+                btnSettings.alpha = if (btnSettings.isEnabled) 1.0f else 0.3f
+            }
+
+            if (status.startsWith("PROGRESS:")) {
+                val progressValue = status.substringAfter("PROGRESS:").toFloatOrNull() ?: 0f
+                runOnUiThread {
+                    progressBar?.isIndeterminate = false
+                    progressBar?.progress = (progressValue * 100).toInt()
+                }
+                return
+            }
+
+            if (status.equals("VPN Stopped", ignoreCase = true)) {
+                return
+            }
+
             logToConsole(status)
 
             if (status.contains("Starting", ignoreCase = true) ||
@@ -3211,7 +3350,59 @@ class MainActivity : AppCompatActivity() {
                 val cleanMsg = status.replace("[Core]", "").replace("[AUTH]", "").trim()
                 updateEventStatus("[$time] $cleanMsg")
             }
+
+            val isAuthError = status.contains("сессий", ignoreCase = true) ||
+                status.contains("истекло", ignoreCase = true) ||
+                status.contains("denied", ignoreCase = true)
+
+            when {
+                status.contains("Active node:") -> {
+                    val activeName = status.substringAfter("Active node:").trim()
+                    runOnUiThread {
+                        val index = availableServers.indexOfFirst { it.name == activeName }
+                        if (index >= 0) {
+                            val server = availableServers[index]
+                            serverSelectTextView.text = server.name
+                            selectedServerName = server.id
+                            getAppPrefs()
+                                .edit()
+                                .putString("selected_server_${selectedConfigName}", server.id)
+                                .apply()
+                        }
+                    }
+                }
+
+                status.contains("Найдено обновление", ignoreCase = true) -> {
+                    val tag = getPendingTag()
+                    val body = getPendingBody()
+                    showUpdateModal(tag, body)
+                }
+
+                status.contains("Update downloaded to cache", ignoreCase = true) -> {
+                    updateDialog?.dismiss()
+                    installApk()
+                }
+
+                isAuthError -> {
+                    stopVpnService()
+                    setUiState(State.DISCONNECTED)
+                    showErrorDialog(status)
+                }
+            }
         }
+    }
+
+    @Keep
+    fun onStatusChanged(status: String) {
+        val intent = Intent("org.alco.anet.VPN_STATUS")
+        intent.putExtra("status", status)
+        intent.setPackage(packageName)
+        sendBroadcast(intent)
+    }
+
+    @Keep
+    fun onTrafficStats(rx: String, tx: String, rtt: String, rxm: String, txm: String) {
+        updateTrafficStats(rx, tx, rtt, rxm, txm)
     }
 
     private fun updateEventStatus(msg: String) {
@@ -4259,7 +4450,7 @@ class MainActivity : AppCompatActivity() {
                 readTimeout = timeoutMs
                 requestMethod = "HEAD"
                 instanceFollowRedirects = false
-                setRequestProperty("User-Agent", "Mozilla/5.0 ANet-ConnectivityCheck")
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
             }
             val code = conn.responseCode
             val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)

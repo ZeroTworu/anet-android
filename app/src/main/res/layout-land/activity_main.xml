@@ -87,6 +87,8 @@
                 android:layout_height="180dp"
                 android:clickable="true"
                 android:focusable="true"
+                android:nextFocusDown="@+id/serverSelectContainer"
+                android:nextFocusRight="@+id/btnCheckUpdate"
                 android:fontFamily="sans-serif-medium"
                 android:letterSpacing="0.08"
                 android:text="CONNECT"
@@ -121,16 +123,20 @@
         <!-- 3. Выпадающий список выбора ноды -->
         <LinearLayout
             android:id="@+id/serverSelectContainer"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:background="@drawable/linear_radius"
             android:clickable="true"
             android:focusable="true"
+            android:nextFocusUp="@+id/connect"
+            android:nextFocusRight="@+id/btnRefreshNodes"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:padding="12dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            app:layout_constraintBottom_toTopOf="@+id/nodeProbeProgressContainer"
+            app:layout_constraintEnd_toStartOf="@+id/btnRefreshNodes"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/buttonAndSpinnerLayout">
 
@@ -155,11 +161,81 @@
                 android:textStyle="bold"
                 tools:text="Server 1" />
 
+            <TextView
+                android:id="@+id/tvSelectedServerRtt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="..."
+                android:textColor="#787C84"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
             <ImageView
                 android:id="@+id/serverSelectIcon"
                 android:layout_width="22dp"
                 android:layout_height="22dp"
                 android:src="@drawable/chevron_down" />
+        </LinearLayout>
+
+        <!-- Кнопка принудительной перепроверки статуса серверов справа от селектора -->
+        <TextView
+            android:id="@+id/btnRefreshNodes"
+            android:layout_width="42dp"
+            android:layout_height="0dp"
+            android:background="@drawable/linear_radius"
+            android:clickable="true"
+            android:focusable="true"
+            android:nextFocusLeft="@+id/serverSelectContainer"
+            android:nextFocusUp="@+id/connect"
+            android:nextFocusRight="@+id/connectivityShieldCard"
+            android:gravity="center"
+            android:text="↻"
+            android:textColor="#E0E0E0"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:layout_constraintBottom_toBottomOf="@+id/serverSelectContainer"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@+id/serverSelectContainer" />
+
+        <!-- Индикатор прогресса проверки узлов: ПРОВЕРКА УЗЛОВ X/Y -->
+        <LinearLayout
+            android:id="@+id/nodeProbeProgressContainer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="6dp"
+            android:layout_marginTop="4dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/serverSelectContainer">
+
+            <ProgressBar
+                android:id="@+id/pbNodeProbe"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminate="false"
+                android:max="100"
+                android:progress="0"
+                android:progressBackgroundTint="#262830"
+                android:progressTint="#38C976" />
+
+            <TextView
+                android:id="@+id/tvNodeProbeProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.06"
+                android:text="ПРОВЕРКА УЗЛОВ 0/0"
+                android:textColor="#8A8E99"
+                android:textSize="9.5sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
@@ -203,6 +279,9 @@
                 android:background="@android:color/transparent"
                 android:clickable="true"
                 android:focusable="true"
+                android:nextFocusLeft="@+id/connect"
+                android:nextFocusRight="@+id/btnSettings"
+                android:nextFocusDown="@+id/connectivityShieldCard"
                 android:text="Update"
                 android:textColor="@color/buttons_icon_color"
                 android:textSize="@dimen/button_font_size"
@@ -220,6 +299,8 @@
                 android:background="@android:color/transparent"
                 android:clickable="true"
                 android:focusable="true"
+                android:nextFocusLeft="@+id/btnCheckUpdate"
+                android:nextFocusDown="@+id/connectivityShieldCard"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:paddingHorizontal="8dp"
@@ -366,8 +447,12 @@
                 android:id="@+id/connectivityShieldCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:background="@drawable/linear_radius"
                 android:clickable="true"
                 android:focusable="true"
+                android:nextFocusUp="@+id/btnCheckUpdate"
+                android:nextFocusDown="@+id/btnShowLogs"
+                android:nextFocusLeft="@+id/btnRefreshNodes"
                 android:orientation="vertical">
 
                 <LinearLayout
@@ -378,11 +463,10 @@
 
                     <ImageView
                         android:id="@+id/connectivityBadgeDot"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
                         android:layout_marginEnd="6dp"
-                        android:src="@drawable/dot"
-                        app:tint="#FFC107" />
+                        android:src="@drawable/dot" />
 
                     <TextView
                         android:id="@+id/tvConnectivityTitle"
@@ -686,6 +770,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:backgroundTint="#333333"
+                android:clickable="true"
+                android:focusable="true"
+                android:nextFocusUp="@+id/connectivityShieldCard"
+                android:nextFocusLeft="@+id/btnRefreshNodes"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:paddingHorizontal="8dp"
@@ -696,5 +784,24 @@
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Унифицированное всплывающее уведомление (как на десктопе) -->
+    <TextView
+        android:id="@+id/tvAppToast"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:elevation="24dp"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:paddingHorizontal="18dp"
+        android:paddingVertical="8dp"
+        android:text="Проверка маршрутов..."
+        android:textColor="#000000"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
