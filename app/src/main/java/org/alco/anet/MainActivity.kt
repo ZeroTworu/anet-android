@@ -3578,7 +3578,7 @@ class MainActivity : AppCompatActivity() {
 
                     connectionStatusLabel.setLeftIcon(
                         R.drawable.update,
-                        "CONNECTING",
+                        if (isStopping) "STOPPING" else "CONNECTING",
                         offsetX = -2,
                         offsetY = 0,
                         color = (0xFFFE6102.toInt()),
@@ -3586,7 +3586,7 @@ class MainActivity : AppCompatActivity() {
                         heightDp = 12
                     )
                     connectionStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.grey_light))
-                    serverSelectContainer.isEnabled = true
+                    serverSelectContainer.isEnabled = !isStopping
                     serverIndicator.imageTintList = ColorStateList.valueOf(Color.parseColor("#669D29"))
                 }
 

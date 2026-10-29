@@ -35,6 +35,7 @@ class ANetVpnService : VpnService() {
     // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
     // интерфейс, который Rust успел поднять через configureTun().
     private val tunGeneration = AtomicInteger(0)
+    private val sessionGeneration = AtomicInteger(0)
 
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -151,6 +152,10 @@ class ANetVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
+        val connectGen = sessionGeneration.incrementAndGet()
+        isShuttingDown = false
+        isServiceRunning = true
+
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, "ANetChannel")
             .setContentTitle("ANet VPN")
@@ -192,7 +197,11 @@ class ANetVpnService : VpnService() {
         allowedAppsCache = intent?.getStringArrayListExtra("ALLOWED_APPS") ?: emptyList()
         registerNetworkCallback()
 
-        Thread { connectVpn(config, selectedServer) }.start()
+        Thread {
+            if (sessionGeneration.get() == connectGen && !isShuttingDown) {
+                connectVpn(config, selectedServer)
+            }
+        }.start()
         return START_STICKY
     }
 
@@ -352,8 +361,9 @@ class ANetVpnService : VpnService() {
         hadActiveNetwork = false
     }
 
+    @androidx.annotation.Keep
     @Synchronized
-    private fun closeTun() {
+    fun closeTun() {
         if (vpnInterface != null) {
             Log.i("ANet", "Closing TUN to prevent routing blackhole during reconnect...")
             try {
@@ -716,18 +726,45 @@ class ANetVpnService : VpnService() {
     private fun requestStop() {
         if (isShuttingDown) return
         isShuttingDown = true
+        val stopGen = sessionGeneration.incrementAndGet()
+
+        val stoppingIntent = Intent("org.alco.anet.VPN_STATUS").apply {
+            putExtra(EXTRA_VPN_STATE, STATE_STOPPING)
+            putExtra(EXTRA_VPN_MESSAGE, "Stopping VPN...")
+            putExtra(EXTRA_SERVER_NAME, "")
+            setPackage(packageName)
+        }
+        sendBroadcast(stoppingIntent)
+
+        // Закрываем TUN-дескриптор синхронно до stopVpn(), чтобы мгновенно разблокировать нативный read/write в ядре
+        closeTun()
         releaseLocks()
+        unregisterNetworkCallback()
+
         Thread {
-            stopVpn()
-            mainHandler.post {
-                val intent = Intent("org.alco.anet.VPN_STATUS").apply {
-                    putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
-                    putExtra(EXTRA_VPN_MESSAGE, "")
-                    putExtra(EXTRA_SERVER_NAME, "")
-                    setPackage(packageName)
+            val nativeStopWorker = Thread {
+                try {
+                    stopVpn()
+                } catch (e: Throwable) {
+                    Log.e("ANet", "stopVpn failed", e)
                 }
-                sendBroadcast(intent)
-                stopVpnInternal()
+            }
+            nativeStopWorker.start()
+            try {
+                nativeStopWorker.join(4500L)
+            } catch (_: InterruptedException) {}
+
+            mainHandler.post {
+                if (sessionGeneration.get() == stopGen) {
+                    val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+                        putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                        putExtra(EXTRA_VPN_MESSAGE, "")
+                        putExtra(EXTRA_SERVER_NAME, "")
+                        setPackage(packageName)
+                    }
+                    sendBroadcast(intent)
+                    stopVpnInternal()
+                }
             }
         }.start()
     }
@@ -746,25 +783,27 @@ class ANetVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        isServiceRunning = false
-        releaseLocks()
-        val intent = Intent("org.alco.anet.VPN_STATUS").apply {
-            putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
-            putExtra(EXTRA_VPN_MESSAGE, "")
-            putExtra(EXTRA_SERVER_NAME, "")
-            setPackage(packageName)
-        }
-        sendBroadcast(intent)
-
-        // Останавливаем и Rust-часть: иначе tokio-рантайм продолжает жить
-        // в процессе после смерти сервиса — клиент бесконечно реконнектится
-        // в фоне (батарея), а колбэки летят в мертвый Service через GlobalRef.
         if (!isShuttingDown) {
             isShuttingDown = true
+            isServiceRunning = false
+            sessionGeneration.incrementAndGet()
+            closeTun()
+            releaseLocks()
+            unregisterNetworkCallback()
+            val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+                putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                putExtra(EXTRA_VPN_MESSAGE, "")
+                putExtra(EXTRA_SERVER_NAME, "")
+                setPackage(packageName)
+            }
+            sendBroadcast(intent)
             Thread { stopVpn() }.start()
+        } else {
+            isServiceRunning = false
+            releaseLocks()
+            unregisterNetworkCallback()
+            closeTun()
         }
-        unregisterNetworkCallback()
-        closeTun()
         clearVpnCallback()
         super.onDestroy()
     }
