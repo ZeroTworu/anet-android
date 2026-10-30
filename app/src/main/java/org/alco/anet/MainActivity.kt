@@ -4328,10 +4328,15 @@ class MainActivity : AppCompatActivity() {
             setColor(Color.parseColor("#121212"))
         }
 
-        val strokeDrawable = object : Drawable() {
+        fun makeStrokeDrawable(): Drawable = object : Drawable() {
             private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 style = android.graphics.Paint.Style.STROKE
                 strokeWidth = strokeWidthPx
+            }
+
+            private val state = object : ConstantState() {
+                override fun newDrawable(): Drawable = makeStrokeDrawable()
+                override fun getChangingConfigurations(): Int = 0
             }
 
             override fun draw(canvas: Canvas) {
@@ -4352,10 +4357,19 @@ class MainActivity : AppCompatActivity() {
                 canvas.drawOval(rect, paint)
             }
 
-            override fun setAlpha(alpha: Int) {}
-            override fun setColorFilter(filter: ColorFilter?) {}
+            override fun setAlpha(alpha: Int) {
+                paint.alpha = alpha
+            }
+
+            override fun setColorFilter(filter: ColorFilter?) {
+                paint.colorFilter = filter
+            }
+
             override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+            override fun getConstantState(): ConstantState = state
+            override fun mutate(): Drawable = this
         }
+        val strokeDrawable = makeStrokeDrawable()
 
         val layerDrawable = android.graphics.drawable.LayerDrawable(arrayOf(solidBackground, strokeDrawable))
         val rippleColor = ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
