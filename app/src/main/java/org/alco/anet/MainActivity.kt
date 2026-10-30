@@ -3335,7 +3335,16 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            if (status.equals("VPN Stopped", ignoreCase = true)) {
+            if (status.equals("VPN Stopped", ignoreCase = true) ||
+                status.contains("VPN Stopped.", ignoreCase = true)
+            ) {
+                if (status.contains("VPN Stopped.", ignoreCase = true)) {
+                    logToConsole(status)
+                    val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    val cleanMsg = status.replace("[Core]", "").replace("[AUTH]", "").trim()
+                    updateEventStatus("[$time] $cleanMsg")
+                }
+                handleVpnState(ANetVpnService.STATE_STOPPED, "", "")
                 return
             }
 
@@ -3407,6 +3416,13 @@ class MainActivity : AppCompatActivity() {
         intent.putExtra("status", status)
         intent.setPackage(packageName)
         sendBroadcast(intent)
+    }
+
+    @Keep
+    fun onVpnStateChanged(state: Int, message: String, serverName: String) {
+        runOnUiThread {
+            handleVpnState(state, message, serverName)
+        }
     }
 
     @Keep
@@ -4050,7 +4066,10 @@ class MainActivity : AppCompatActivity() {
     ) {
         lastConnCondition = conditionCode
         lastConnPulseColor = pulseColorCode
-        if (rttMs > 0L || !isVpnConnected) {
+        val isCompletelyDead = (pulseColorCode == PulseLineView.PULSE_RED) || (globalOk == 0 && domesticOk == 0)
+        if (isCompletelyDead) {
+            lastConnRttMs = -1L
+        } else if (rttMs > 0L || !isVpnConnected) {
             lastConnRttMs = rttMs
         }
         if (title.isNotBlank()) lastConnTitle = title
@@ -4081,7 +4100,7 @@ class MainActivity : AppCompatActivity() {
                 colorCode = pulseColorCode
             )
 
-            val displayRtt = if (rttMs > 0L) rttMs else lastConnRttMs
+            val displayRtt = if (isCompletelyDead) -1L else if (rttMs > 0L) rttMs else lastConnRttMs
             pulseLineView.updateState(pulseColorCode, displayRtt)
             tvRtt.setTextColor(activeColor)
             tvRtt.text = if (displayRtt > 0L) "$displayRtt мс" else "— мс"
@@ -4155,35 +4174,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun computeShieldPulseColor(): Int {
-        // Коды состояния связности (ConnectivityCondition):
-        // 0 = Offline (ни РФ, ни Мир)
-        // 1 = DomesticOnly ("Белые списки" без VPN: РФ отвечает, Мир нет)
-        // 2 = DirectOnline (прямая связь без VPN: глобальная сеть отвечает)
-        // 3 = TunnelLost (VPN включён, но ни РФ, ни Мир не отвечают)
-        // 4 = TunnelOnlyNoWorld ("Белые списки" при включённом VPN: РФ отвечает, Мир нет)
-        // 5 = TunnelFullOnline (VPN включён, глобальная сеть отвечает)
-        return when (currentUiState) {
-            State.DISCONNECTED -> {
-                when {
-                    lastConnCondition == 2 || lastConnGlobalOk > 0 -> PulseLineView.PULSE_GRAY
-                    lastConnCondition == 1 || lastConnDomesticOk > 0 -> PulseLineView.PULSE_YELLOW
-                    else -> PulseLineView.PULSE_RED
-                }
-            }
-            State.CONNECTING -> {
-                if (lastConnCondition == 0 && lastConnGlobalOk == 0 && lastConnDomesticOk == 0) {
-                    PulseLineView.PULSE_RED
-                } else {
-                    PulseLineView.PULSE_YELLOW
-                }
-            }
-            State.CONNECTED -> {
-                when {
-                    lastConnCondition == 5 || lastConnGlobalOk > 0 -> PulseLineView.PULSE_GREEN
-                    lastConnCondition == 4 || lastConnDomesticOk > 0 -> PulseLineView.PULSE_YELLOW
-                    else -> PulseLineView.PULSE_RED
-                }
-            }
+        // Строгая логика цвета щита:
+        // "ЖЁЛТЫЙ" - "Белые списки" (что с VPN что без него): РФ > 0, Мир == 0
+        // "КРАСНЫЙ" - ни впн, ни связи: РФ == 0 и Мир == 0
+        // "СЕРЫЙ" - связь есть, нет VPN: Мир > 0 и VPN не подключен
+        // "ЗЕЛЁНЫЙ" - связь есть + VPN подключен
+        return when {
+            lastConnDomesticOk > 0 && lastConnGlobalOk == 0 -> PulseLineView.PULSE_YELLOW
+            lastConnGlobalOk == 0 && lastConnDomesticOk == 0 -> PulseLineView.PULSE_RED
+            isVpnConnected || currentUiState == State.CONNECTED -> PulseLineView.PULSE_GREEN
+            else -> PulseLineView.PULSE_GRAY
         }
     }
 

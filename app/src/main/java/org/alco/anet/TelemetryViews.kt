@@ -189,13 +189,13 @@ class PulseLineView @JvmOverloads constructor(
 
         // 6. Рисуем 4 столбика уровня сигнала справа от линии
         val litBars = when (pulseColorCode) {
-            PULSE_RED -> 1
+            PULSE_RED -> 0
             PULSE_YELLOW -> 2
             else -> when {
                 rttMs in 1..85 -> 4
                 rttMs in 86..170 -> 3
                 rttMs > 170 -> 2
-                else -> 4
+                else -> 0
             }
         }
 

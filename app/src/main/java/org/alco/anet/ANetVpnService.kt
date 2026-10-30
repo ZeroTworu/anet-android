@@ -30,6 +30,7 @@ class ANetVpnService : VpnService() {
     @Volatile private var lastNetwork: Network? = null
     @Volatile private var hadActiveNetwork = false
     @Volatile private var lastWakeLockRenewMs: Long = 0L
+    @Volatile private var lastNotificationUpdateMs: Long = 0L
 
     // Поколение TUN-интерфейса. Защищает от гонки: отложенный closeTun(),
     // запощенный по статусу "Reconnecting", не должен закрыть УЖЕ НОВЫЙ
@@ -522,17 +523,19 @@ class ANetVpnService : VpnService() {
 
     @androidx.annotation.Keep
     fun onVpnStateChanged(state: Int, message: String, serverName: String) {
-        if (isShuttingDown && state != STATE_STOPPED && state != STATE_DISCONNECTED) {
+        if (isShuttingDown &&
+            state != STATE_STOPPING &&
+            state != STATE_STOPPED &&
+            state != STATE_DISCONNECTED &&
+            state != STATE_FAILED
+        ) {
             Log.d("ANet", "Ignoring queued VPN state during shutdown: $state")
             return
         }
         Log.d("ANet", "VPN state=$state, message=$message, server=$serverName")
-        updateNotification(message)
+        updateNotification(message, force = true)
 
-        if (state == STATE_RECONNECTING || state == STATE_STOPPING ||
-            state == STATE_STOPPED || state == STATE_FAILED) {
-            // Не даём отложенному закрытию уничтожить новый TUN, который Rust
-            // мог успеть создать во время реконнекта.
+        if (state == STATE_STOPPED || state == STATE_DISCONNECTED || state == STATE_FAILED) {
             val generation = tunGeneration.get()
             mainHandler.post {
                 if (tunGeneration.get() == generation) {
@@ -709,7 +712,10 @@ class ANetVpnService : VpnService() {
         sendBroadcast(intent)
     }
 
-    private fun updateNotification(status: String) {
+    private fun updateNotification(status: String, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastNotificationUpdateMs < 800L) return
+        lastNotificationUpdateMs = now
         val nm = getSystemService(NotificationManager::class.java)
         val n = NotificationCompat.Builder(this, "ANetChannel")
             .setContentTitle("ANet VPN")
@@ -728,6 +734,7 @@ class ANetVpnService : VpnService() {
         releaseLocks()
         unregisterNetworkCallback()
         closeTun()
+        clearVpnCallback()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -756,8 +763,6 @@ class ANetVpnService : VpnService() {
         }
         sendBroadcast(stoppingIntent)
 
-        // Закрываем TUN-дескриптор синхронно до stopVpn(), чтобы мгновенно разблокировать нативный read/write в ядре
-        closeTun()
         releaseLocks()
         unregisterNetworkCallback()
 
@@ -767,6 +772,8 @@ class ANetVpnService : VpnService() {
                     stopVpn()
                 } catch (e: Throwable) {
                     Log.e("ANet", "stopVpn failed", e)
+                } finally {
+                    closeTun()
                 }
             }
             nativeStopWorker.start()
@@ -774,15 +781,17 @@ class ANetVpnService : VpnService() {
                 nativeStopWorker.join(4500L)
             } catch (_: InterruptedException) {}
 
+            closeTun()
+
             mainHandler.post {
+                val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+                    putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                    putExtra(EXTRA_VPN_MESSAGE, "")
+                    putExtra(EXTRA_SERVER_NAME, "")
+                    setPackage(packageName)
+                }
+                sendBroadcast(intent)
                 if (sessionGeneration.get() == stopGen) {
-                    val intent = Intent("org.alco.anet.VPN_STATUS").apply {
-                        putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
-                        putExtra(EXTRA_VPN_MESSAGE, "")
-                        putExtra(EXTRA_SERVER_NAME, "")
-                        setPackage(packageName)
-                    }
-                    sendBroadcast(intent)
                     stopVpnInternal()
                 }
             }
