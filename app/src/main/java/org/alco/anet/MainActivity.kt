@@ -230,6 +230,13 @@ class MainActivity : AppCompatActivity() {
             showErrorDialog("Connection timed out. Please check your network or try a different server.")
         }
     }
+    private val stopTimeoutRunnable = Runnable {
+        if (currentUiState == State.CONNECTING && !ANetVpnService.isServiceRunning) {
+            setUiState(State.DISCONNECTED)
+        } else if (currentUiState == State.CONNECTING && connectButton.text.toString().contains("STOPPING", ignoreCase = true)) {
+            setUiState(State.DISCONNECTED)
+        }
+    }
 
         private val availableServers = mutableListOf<ServerModel>()
     private var selectedServerName: String = ""
@@ -2814,10 +2821,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopVpnService() {
         mainHandler.removeCallbacks(connectTimeoutRunnable)
+        mainHandler.removeCallbacks(stopTimeoutRunnable)
         val intent = Intent(this, ANetVpnService::class.java)
         intent.action = ANetVpnService.ACTION_STOP
         startService(intent)
         setUiState(State.CONNECTING, "STOPPING...")
+        mainHandler.postDelayed(stopTimeoutRunnable, 4500L)
     }
 
     private fun showErrorDialog(message: String) {
@@ -3497,6 +3506,7 @@ class MainActivity : AppCompatActivity() {
             when (state) {
                 State.DISCONNECTED -> {
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
+                    mainHandler.removeCallbacks(stopTimeoutRunnable)
                     val wasConnected = isVpnConnected
                     isVpnConnected = false
                     spinner.visibility = View.INVISIBLE
@@ -4145,14 +4155,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun computeShieldPulseColor(): Int {
+        // Коды состояния связности (ConnectivityCondition):
+        // 0 = Offline (ни РФ, ни Мир)
+        // 1 = DomesticOnly ("Белые списки" без VPN: РФ отвечает, Мир нет)
+        // 2 = DirectOnline (прямая связь без VPN: глобальная сеть отвечает)
+        // 3 = TunnelLost (VPN включён, но ни РФ, ни Мир не отвечают)
+        // 4 = TunnelOnlyNoWorld ("Белые списки" при включённом VPN: РФ отвечает, Мир нет)
+        // 5 = TunnelFullOnline (VPN включён, глобальная сеть отвечает)
         return when (currentUiState) {
-            State.DISCONNECTED -> PulseLineView.PULSE_RED
-            State.CONNECTING -> PulseLineView.PULSE_YELLOW
-            State.CONNECTED -> {
-                if (lastConnCondition == 5 || lastConnGlobalOk > 0) {
-                    PulseLineView.PULSE_GREEN
+            State.DISCONNECTED -> {
+                when {
+                    lastConnCondition == 2 || lastConnGlobalOk > 0 -> PulseLineView.PULSE_GRAY
+                    lastConnCondition == 1 || lastConnDomesticOk > 0 -> PulseLineView.PULSE_YELLOW
+                    else -> PulseLineView.PULSE_RED
+                }
+            }
+            State.CONNECTING -> {
+                if (lastConnCondition == 0 && lastConnGlobalOk == 0 && lastConnDomesticOk == 0) {
+                    PulseLineView.PULSE_RED
                 } else {
                     PulseLineView.PULSE_YELLOW
+                }
+            }
+            State.CONNECTED -> {
+                when {
+                    lastConnCondition == 5 || lastConnGlobalOk > 0 -> PulseLineView.PULSE_GREEN
+                    lastConnCondition == 4 || lastConnDomesticOk > 0 -> PulseLineView.PULSE_YELLOW
+                    else -> PulseLineView.PULSE_RED
                 }
             }
         }
@@ -4171,6 +4200,7 @@ class MainActivity : AppCompatActivity() {
         val strokeColor = when (pulseColorCode) {
             PulseLineView.PULSE_RED -> Color.rgb(239, 68, 68)
             PulseLineView.PULSE_YELLOW -> Color.rgb(245, 158, 11)
+            PulseLineView.PULSE_GRAY -> Color.rgb(158, 158, 158)
             else -> Color.rgb(34, 197, 94)
         }
         val fillColor = Color.argb(
@@ -4233,7 +4263,7 @@ class MainActivity : AppCompatActivity() {
                 canvas.drawPath(path, strokePaint)
 
                 when (pulseColorCode) {
-                    PulseLineView.PULSE_GREEN -> {
+                    PulseLineView.PULSE_GREEN, PulseLineView.PULSE_GRAY -> {
                         canvas.drawLine(
                             cx - 2.6f * density,
                             cy + 0.2f * density,

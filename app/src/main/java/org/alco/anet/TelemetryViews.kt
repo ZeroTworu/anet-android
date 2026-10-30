@@ -31,10 +31,12 @@ class PulseLineView @JvmOverloads constructor(
         const val PULSE_RED = 0
         const val PULSE_YELLOW = 1
         const val PULSE_GREEN = 2
+        const val PULSE_GRAY = 3
 
         val COLOR_RED = Color.parseColor("#FF5252")
         val COLOR_YELLOW = Color.parseColor("#FFC107")
         val COLOR_GREEN = Color.parseColor("#00E676")
+        val COLOR_GRAY = Color.parseColor("#9E9E9E")
         val COLOR_TRACK_DIM = Color.parseColor("#2C2C30")
     }
 
@@ -93,6 +95,7 @@ class PulseLineView @JvmOverloads constructor(
     fun getActiveColor(): Int = when (pulseColorCode) {
         PULSE_RED -> COLOR_RED
         PULSE_YELLOW -> COLOR_YELLOW
+        PULSE_GRAY -> COLOR_GRAY
         else -> COLOR_GREEN
     }
 

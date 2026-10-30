@@ -387,6 +387,10 @@ class ANetVpnService : VpnService() {
         fallbackRoutes: String,
         dnsServers: String
     ): Int {
+        if (isShuttingDown || !isServiceRunning) {
+            Log.w("ANet", "configureTun aborted: service is shutting down or not running")
+            return -1
+        }
         Log.i("ANet", "Configuring TUN...")
         tunGeneration.incrementAndGet()
         val oldInterface = vpnInterface
@@ -453,6 +457,12 @@ class ANetVpnService : VpnService() {
 
         return try {
             val newInterface = builder.establish()
+            if (isShuttingDown || !isServiceRunning) {
+                try { newInterface?.close() } catch (_: Exception) {}
+                try { oldInterface?.close() } catch (_: Exception) {}
+                vpnInterface = null
+                return -1
+            }
             if (oldInterface != null && oldInterface !== newInterface) {
                 try {
                     oldInterface.close()
@@ -486,7 +496,6 @@ class ANetVpnService : VpnService() {
                 if (parts.size == 2) {
                     // Вызываем через хелпер, чтобы избежать VerifyError
                     Api33Helper.excludeRoute(builder, parts[0], parts[1].toInt())
-                    Log.i("ANet", "Excluded: $routeStr")
                 }
             } catch (e: Exception) {
                 Log.e("ANet", "Failed to exclude route: $routeStr", e)
@@ -513,7 +522,7 @@ class ANetVpnService : VpnService() {
 
     @androidx.annotation.Keep
     fun onVpnStateChanged(state: Int, message: String, serverName: String) {
-        if (isShuttingDown) {
+        if (isShuttingDown && state != STATE_STOPPED && state != STATE_DISCONNECTED) {
             Log.d("ANet", "Ignoring queued VPN state during shutdown: $state")
             return
         }
@@ -724,7 +733,18 @@ class ANetVpnService : VpnService() {
     }
 
     private fun requestStop() {
-        if (isShuttingDown) return
+        if (isShuttingDown) {
+            if (!isServiceRunning) {
+                val intent = Intent("org.alco.anet.VPN_STATUS").apply {
+                    putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
+                    putExtra(EXTRA_VPN_MESSAGE, "")
+                    putExtra(EXTRA_SERVER_NAME, "")
+                    setPackage(packageName)
+                }
+                sendBroadcast(intent)
+            }
+            return
+        }
         isShuttingDown = true
         val stopGen = sessionGeneration.incrementAndGet()
 
