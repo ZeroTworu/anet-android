@@ -216,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedConfigName: String = "Unknown"
     private var isCheckingUpdates = false
     private var isVpnConnected = false
+    @Volatile private var isStoppingRequested = false
     private var currentUiState = State.DISCONNECTED
     private var updateDialog: AlertDialog? = null
     private var progressBar: ProgressBar? = null
@@ -229,9 +230,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private val stopTimeoutRunnable = Runnable {
-        if (currentUiState == State.CONNECTING && !ANetVpnService.isServiceRunning) {
-            setUiState(State.DISCONNECTED)
-        } else if (currentUiState == State.CONNECTING && connectButton.text.toString().contains("STOPPING", ignoreCase = true)) {
+        isStoppingRequested = false
+        if (currentUiState == State.CONNECTING) {
             setUiState(State.DISCONNECTED)
         }
     }
@@ -2736,6 +2736,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpnService() {
+        isStoppingRequested = false
+        mainHandler.removeCallbacks(stopTimeoutRunnable)
         setUiState(State.CONNECTING)
 
         val intent = Intent(this, ANetVpnService::class.java)
@@ -2753,6 +2755,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopVpnService() {
+        isStoppingRequested = true
         mainHandler.removeCallbacks(connectTimeoutRunnable)
         mainHandler.removeCallbacks(stopTimeoutRunnable)
         val intent = Intent(this, ANetVpnService::class.java)
@@ -3390,6 +3393,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVpnState(state: Int, message: String, serverName: String) {
+        if (isStoppingRequested && (
+                state == ANetVpnService.STATE_CONNECTING ||
+                state == ANetVpnService.STATE_RECONNECTING ||
+                state == ANetVpnService.STATE_CONNECTED
+            )
+        ) {
+            return
+        }
+        if (state == ANetVpnService.STATE_DISCONNECTED ||
+            state == ANetVpnService.STATE_STOPPED ||
+            state == ANetVpnService.STATE_FAILED
+        ) {
+            isStoppingRequested = false
+        }
         if (state == ANetVpnService.STATE_FAILED && message.isNotBlank()) {
             logToConsole(message)
         }
@@ -3454,6 +3471,7 @@ class MainActivity : AppCompatActivity() {
 
             when (state) {
                 State.DISCONNECTED -> {
+                    isStoppingRequested = false
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
                     mainHandler.removeCallbacks(stopTimeoutRunnable)
                     val wasConnected = isVpnConnected

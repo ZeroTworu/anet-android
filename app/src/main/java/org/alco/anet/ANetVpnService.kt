@@ -732,6 +732,11 @@ class ANetVpnService : VpnService() {
 
     private fun requestStop() {
         if (isShuttingDown) {
+            Thread {
+                try {
+                    stopVpn()
+                } catch (_: Throwable) {}
+            }.start()
             if (!isServiceRunning) {
                 val intent = Intent("org.alco.anet.VPN_STATUS").apply {
                     putExtra(EXTRA_VPN_STATE, STATE_STOPPED)
