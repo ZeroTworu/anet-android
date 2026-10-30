@@ -570,15 +570,6 @@ class ANetVpnService : VpnService() {
         cachedAccountTraffic = "$consumed\n/ $limit"
         cachedAccountSpeed = speed
         cachedAccountSessions = sessions
-        try {
-            getSharedPreferences("anet_prefs", Context.MODE_PRIVATE).edit()
-                .putString("acc_group_cached", cachedAccountGroup)
-                .putString("acc_expires_cached", cachedAccountExpires)
-                .putString("acc_traffic_cached", cachedAccountTraffic)
-                .putString("acc_speed_cached", cachedAccountSpeed)
-                .putString("acc_sessions_cached", cachedAccountSessions)
-                .apply()
-        } catch (_: Exception) {}
 
         val intent = Intent("org.alco.anet.VPN_STATUS").apply {
             putExtra("is_account_info", true)
@@ -765,6 +756,18 @@ class ANetVpnService : VpnService() {
 
         releaseLocks()
         unregisterNetworkCallback()
+        closeTun()
+        cachedAccountGroup = ""
+        cachedAccountExpires = ""
+        cachedAccountTraffic = ""
+        cachedAccountSpeed = ""
+        cachedAccountSessions = ""
+        cachedRxCurve = FloatArray(0)
+        cachedTxCurve = FloatArray(0)
+        cachedRxSpeedStr = "0 B/s"
+        cachedTxSpeedStr = "0 B/s"
+        cachedTotalRxStr = "0 B"
+        cachedTotalTxStr = "0 B"
 
         Thread {
             val nativeStopWorker = Thread {

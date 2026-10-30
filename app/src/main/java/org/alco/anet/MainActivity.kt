@@ -59,7 +59,6 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
 import java.net.URL
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -161,7 +160,6 @@ class MainActivity : AppCompatActivity() {
     private var lastConnGlobalTotal: Int = 3
     private var lastConnDomesticOk: Int = 0
     private var lastConnDomesticTotal: Int = 3
-    private var useKotlinFallbackProber: Boolean = false
 
     private var isScanningQr = false
     private lateinit var connectionStatusLabel: TextView
@@ -610,101 +608,25 @@ class MainActivity : AppCompatActivity() {
         logToConsole("Запрос серверного конфига: $normalized")
 
         Thread {
-            var currentUrl = normalized
-            var redirectsCount = 0
-            val maxRedirects = 5
             var content: String? = null
+            var fetchErr: String? = null
 
-            // Приоритетная загрузка через Rust http_help.rs (BrowserProfile + BoringSSL мимикрия)
+            // Загрузка строго через Rust http_help.rs (BrowserProfile + BoringSSL мимикрия)
             try {
                 val nativeRes = fetchConfigFromUrl(normalized)
                 if (nativeRes.startsWith("OK\n")) {
                     content = nativeRes.substringAfter("OK\n")
+                } else if (nativeRes.startsWith("ERROR\n")) {
+                    fetchErr = nativeRes.substringAfter("ERROR\n")
                 }
-            } catch (e: UnsatisfiedLinkError) {
-                Log.w("ANet", "Native fetchConfigFromUrl unavailable, falling back: ${e.message}")
-            } catch (e: Exception) {
-                Log.w("ANet", "Native fetchConfigFromUrl failed, falling back: ${e.message}")
-            }
-
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-                override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
-            })
-
-            if (content.isNullOrBlank()) {
-                try {
-                    val sc = SSLContext.getInstance("TLS")
-                    sc.init(null, trustAllCerts, SecureRandom())
-                    HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
-                    HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
-                } catch (e: Exception) {
-                    Log.e("ANet", "SSL TrustAll setup failed: ${e.message}")
-                }
-            }
-
-            while (content.isNullOrBlank() && redirectsCount < maxRedirects) {
-                var connection: HttpURLConnection? = null
-                try {
-                    val urlObj = URL(currentUrl)
-                    connection = urlObj.openConnection() as HttpURLConnection
-                    connection.connectTimeout = 12000
-                    connection.readTimeout = 12000
-                    connection.requestMethod = "GET"
-                    connection.instanceFollowRedirects = false
-                    connection.setRequestProperty(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
-                    )
-                    connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-
-                    val status = connection.responseCode
-
-                    if (status == HttpURLConnection.HTTP_MOVED_PERM ||
-                        status == HttpURLConnection.HTTP_MOVED_TEMP ||
-                        status == HttpURLConnection.HTTP_SEE_OTHER ||
-                        status == 307 || status == 308
-                    ) {
-                        val newUrl = connection.getHeaderField("Location")
-                        if (!newUrl.isNullOrBlank()) {
-                            currentUrl = normalizeUrl(if (newUrl.startsWith("http://") || newUrl.startsWith("https://")) {
-                                newUrl
-                            } else {
-                                URL(urlObj, newUrl).toString()
-                            })
-                            redirectsCount++
-                            continue
-                        }
-                    }
-
-                    if (status == HttpURLConnection.HTTP_OK) {
-                        content = connection.inputStream.bufferedReader().use { it.readText() }
-                        break
-                    } else {
-                        val err = "Сервер вернул код: HTTP $status"
-                        runOnUiThread {
-                            logToConsole("Ошибка загрузки: $err")
-                            onError?.invoke(err)
-                        }
-                        return@Thread
-                    }
-                } catch (e: Exception) {
-                    val errorMsg = "Ошибка сети: ${e.localizedMessage ?: e.message}"
-                    runOnUiThread {
-                        logToConsole(errorMsg)
-                        onError?.invoke(errorMsg)
-                    }
-                    return@Thread
-                } finally {
-                    connection?.disconnect()
-                }
+            } catch (e: Throwable) {
+                fetchErr = e.localizedMessage ?: e.message
             }
 
             if (content.isNullOrBlank()) {
+                val err = fetchErr?.takeIf { it.isNotBlank() } ?: "Получен пустой ответ от сервера"
                 runOnUiThread {
-                    val err = "Получен пустой ответ от сервера"
-                    logToConsole(err)
+                    logToConsole("Ошибка загрузки: $err")
                     onError?.invoke(err)
                 }
                 return@Thread
@@ -817,20 +739,27 @@ class MainActivity : AppCompatActivity() {
         initLogger()
         loadConfigFromPrefs()
 
+        val initialVpnState = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
+        val vpnActiveOnStart = initialVpnState == ANetVpnService.STATE_CONNECTING ||
+            initialVpnState == ANetVpnService.STATE_CONNECTED ||
+            initialVpnState == ANetVpnService.STATE_RECONNECTING
+
         val savedServerUrl = getSavedServerUrl()
         val hasConfigs = getSavedConfigs().isNotEmpty()
 
-        if (!savedServerUrl.isNullOrBlank()) {
+        if (!savedServerUrl.isNullOrBlank() && !vpnActiveOnStart) {
             logToConsole("Автообновление серверного конфига...")
             fetchServerConfigFromUrl(savedServerUrl, showToastOnSuccess = false)
-        } else if (!hasConfigs) {
+        } else if (!hasConfigs && !vpnActiveOnStart) {
             showEnterUrlDialog()
         }
 
         if (selectedConfigContent != null) {
             logToConsole("Config loaded: $selectedConfigName")
             setupServerSelector()
-            checkBatteryOptimizations()
+            if (!vpnActiveOnStart) {
+                checkBatteryOptimizations()
+            }
         }
 
         val filter = IntentFilter("org.alco.anet.VPN_STATUS")
@@ -852,7 +781,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        setUiState(State.DISCONNECTED)
+        if (vpnActiveOnStart) {
+            handleVpnState(initialVpnState, "", getVpnServerName())
+        } else {
+            setUiState(State.DISCONNECTED)
+        }
 
         findViewById<TextView>(R.id.versionLabel).text = getAppVersion()
         findViewById<TextView>(R.id.buildDetailLabel).text = getBuildInfo()
@@ -3538,6 +3471,7 @@ class MainActivity : AppCompatActivity() {
                     tvTxm.text = "0 B"
                     hasNativeTelemetryCurve = false
                     telemetrySparklineView.clearGraph()
+                    clearAccountInfoUi()
                     if (wasConnected) {
                         requestConnectivityRecheck(silent = true)
                     }
@@ -3618,13 +3552,9 @@ class MainActivity : AppCompatActivity() {
 
                 State.CONNECTED -> {
                     mainHandler.removeCallbacks(connectTimeoutRunnable)
-                    val wasDisconnected = !isVpnConnected
                     isVpnConnected = true
                     val activeNodeLabel = serverSelectTextView.text?.toString()?.takeIf { it.isNotBlank() } ?: "Туннель"
                     tvPulseTarget.text = activeNodeLabel
-                    if (wasDisconnected && useKotlinFallbackProber) {
-                        requestConnectivityRecheck(silent = true)
-                    }
                     spinner.visibility = View.INVISIBLE
                     spinner.clearAnimation()
 
@@ -3802,16 +3732,6 @@ class MainActivity : AppCompatActivity() {
         ANetVpnService.cachedAccountSpeed = lastAccountSpeed
         ANetVpnService.cachedAccountSessions = lastAccountSessions
 
-        try {
-            getAppPrefs().edit()
-                .putString("acc_group_cached", lastAccountGroup)
-                .putString("acc_expires_cached", lastAccountExpires)
-                .putString("acc_traffic_cached", lastAccountTraffic)
-                .putString("acc_speed_cached", lastAccountSpeed)
-                .putString("acc_sessions_cached", lastAccountSessions)
-                .apply()
-        } catch (_: Exception) {}
-
         runOnUiThread {
             findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
             findViewById<TextView>(R.id.tvAccountExpires)?.text = lastAccountExpires
@@ -3821,25 +3741,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun clearAccountInfoUi() {
+        lastAccountGroup = ""
+        lastAccountExpires = ""
+        lastAccountTraffic = ""
+        lastAccountSpeed = ""
+        lastAccountSessions = ""
+        ANetVpnService.cachedAccountGroup = ""
+        ANetVpnService.cachedAccountExpires = ""
+        ANetVpnService.cachedAccountTraffic = ""
+        ANetVpnService.cachedAccountSpeed = ""
+        ANetVpnService.cachedAccountSessions = ""
+        try {
+            getAppPrefs().edit()
+                .remove("acc_group_cached")
+                .remove("acc_expires_cached")
+                .remove("acc_traffic_cached")
+                .remove("acc_speed_cached")
+                .remove("acc_sessions_cached")
+                .apply()
+        } catch (_: Exception) {}
+        findViewById<TextView>(R.id.tvAccountGroup)?.text = "Тариф • —"
+        findViewById<TextView>(R.id.tvAccountExpires)?.text = "—"
+        findViewById<TextView>(R.id.tvAccountTraffic)?.text = "—\n/ —"
+        findViewById<TextView>(R.id.tvAccountSpeed)?.text = "—"
+        findViewById<TextView>(R.id.tvAccountSessions)?.text = "—"
+    }
+
     private fun restoreAccountInfoUi() {
-        if (lastAccountGroup.isEmpty()) {
-            if (ANetVpnService.cachedAccountGroup.isNotEmpty()) {
-                lastAccountGroup = ANetVpnService.cachedAccountGroup
-                lastAccountExpires = ANetVpnService.cachedAccountExpires
-                lastAccountTraffic = ANetVpnService.cachedAccountTraffic
-                lastAccountSpeed = ANetVpnService.cachedAccountSpeed
-                lastAccountSessions = ANetVpnService.cachedAccountSessions
-            } else {
-                val prefs = getAppPrefs()
-                val savedGroup = prefs.getString("acc_group_cached", "").orEmpty()
-                if (savedGroup.isNotEmpty()) {
-                    lastAccountGroup = savedGroup
-                    lastAccountExpires = prefs.getString("acc_expires_cached", "Бессрочно").orEmpty()
-                    lastAccountTraffic = prefs.getString("acc_traffic_cached", "—\n/ —").orEmpty()
-                    lastAccountSpeed = prefs.getString("acc_speed_cached", "—").orEmpty()
-                    lastAccountSessions = prefs.getString("acc_sessions_cached", "—").orEmpty()
-                }
-            }
+        val stateCode = if (ANetVpnService.isServiceRunning) getVpnStateCode() else ANetVpnService.STATE_DISCONNECTED
+        if (stateCode != ANetVpnService.STATE_CONNECTED && stateCode != ANetVpnService.STATE_RECONNECTING) {
+            clearAccountInfoUi()
+            return
+        }
+        if (lastAccountGroup.isEmpty() && ANetVpnService.cachedAccountGroup.isNotEmpty()) {
+            lastAccountGroup = ANetVpnService.cachedAccountGroup
+            lastAccountExpires = ANetVpnService.cachedAccountExpires
+            lastAccountTraffic = ANetVpnService.cachedAccountTraffic
+            lastAccountSpeed = ANetVpnService.cachedAccountSpeed
+            lastAccountSessions = ANetVpnService.cachedAccountSessions
         }
         if (lastAccountGroup.isNotEmpty()) {
             findViewById<TextView>(R.id.tvAccountGroup)?.text = lastAccountGroup
@@ -4153,12 +4093,7 @@ class MainActivity : AppCompatActivity() {
     private fun safeStartConnectivityMonitor() {
         try {
             startConnectivityMonitor(selectedConfigContent ?: "")
-            useKotlinFallbackProber = false
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w("ANet", "Native startConnectivityMonitor unavailable, using Kotlin fallback prober")
-            useKotlinFallbackProber = true
-            startKotlinFallbackProber()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("ANet", "Failed to start connectivity monitor: ${e.message}")
         }
     }
@@ -4357,138 +4292,9 @@ class MainActivity : AppCompatActivity() {
             logToConsole("Запущена внеплановая проверка маршрутов…")
         }
         try {
-            if (!useKotlinFallbackProber) {
-                triggerConnectivityCheck()
-            } else {
-                runSingleKotlinFallbackProbe()
-            }
-        } catch (e: UnsatisfiedLinkError) {
-            useKotlinFallbackProber = true
-            runSingleKotlinFallbackProbe()
-        }
-    }
-
-    private val fallbackProbeRunnable = object : Runnable {
-        override fun run() {
-            if (!useKotlinFallbackProber || isFinishing) return
-            runSingleKotlinFallbackProbe()
-            mainHandler.postDelayed(this, 4000L)
-        }
-    }
-
-    private fun startKotlinFallbackProber() {
-        mainHandler.removeCallbacks(fallbackProbeRunnable)
-        mainHandler.post(fallbackProbeRunnable)
-    }
-
-    private fun runSingleKotlinFallbackProbe() {
-        Thread {
-            val domesticHosts = parseTomlStringArray(selectedConfigContent, "domestic_targets")
-                .ifEmpty { listOf("https://ya.ru", "https://vk.com", "https://dzen.ru") }
-            val globalHosts = parseTomlStringArray(selectedConfigContent, "global_targets")
-                .ifEmpty { listOf("https://www.google.com/generate_204", "https://connectivitycheck.gstatic.com/generate_204", "https://store.steampowered.com/favicon.ico") }
-            var domOk = 0
-            var globOk = 0
-            var bestRtt = Long.MAX_VALUE
-
-            for (urlStr in domesticHosts) {
-                var rtt = probeHttpHead(urlStr, 2200)
-                if (rtt <= 0L && urlStr.contains("gosuslugi.ru", ignoreCase = true)) {
-                    rtt = probeHttpHead("https://dzen.ru", 2200)
-                }
-                if (rtt > 0L) {
-                    domOk++
-                    if (rtt < bestRtt) bestRtt = rtt
-                }
-            }
-            for (urlStr in globalHosts) {
-                val rtt = probeHttpHead(urlStr, 2200)
-                if (rtt > 0L) {
-                    globOk++
-                    if (rtt < bestRtt) bestRtt = rtt
-                }
-            }
-
-            val rttMs = if (bestRtt != Long.MAX_VALUE) bestRtt else lastConnRttMs
-            val vpnOn = isVpnConnected
-            val (cond, color, title, subtitle) = when {
-                !vpnOn && domOk == 0 && globOk == 0 -> Quad(
-                    0, PulseLineView.PULSE_RED,
-                    "Полный штиль",
-                    "Ни свои, ни чужие берега не отвечают. Проверьте Wi-Fi, баланс или антенну."
-                )
-                !vpnOn && domOk > 0 && globOk == 0 -> Quad(
-                    1, PulseLineView.PULSE_YELLOW,
-                    "Метеосводка: локальная облачность",
-                    "Домашние гавани открыты, дальние берега в тумане. Включите VPN для улучшения погоды."
-                )
-                !vpnOn -> Quad(
-                    2, PulseLineView.PULSE_GREEN,
-                    "Погода лётная",
-                    "Основной интернет работает штатно. Туннель нужен только для особых маршрутов."
-                )
-                vpnOn && domOk == 0 && globOk == 0 -> Quad(
-                    3, PulseLineView.PULSE_RED,
-                    "Потеряна связь с бортом",
-                    "Туннель поднят, но эхо до сервера не доходит. Попробуйте сменить узел."
-                )
-                vpnOn && globOk == 0 -> Quad(
-                    4, PulseLineView.PULSE_YELLOW,
-                    "Туннель в тупике",
-                    "Связь с узлом есть, но внешний мир из этой точки не отвечает. Смените локацию."
-                )
-                else -> Quad(
-                    5, PulseLineView.PULSE_GREEN,
-                    "Полный вперёд",
-                    "Туннель стабилен, дальние маршруты открыты и работают без помех."
-                )
-            }
-            applyConnectivityState(
-                conditionCode = cond,
-                pulseColorCode = color,
-                rttMs = rttMs,
-                vpnConnected = vpnOn,
-                title = title,
-                subtitle = subtitle,
-                globalOk = globOk,
-                globalTotal = globalHosts.size,
-                domesticOk = domOk,
-                domesticTotal = domesticHosts.size
-            )
-        }.start()
-    }
-
-    private data class Quad(val cond: Int, val color: Int, val title: String, val subtitle: String)
-
-    private fun parseTomlStringArray(tomlContent: String?, key: String): List<String> {
-        if (tomlContent.isNullOrBlank()) return emptyList()
-        val regex = Regex("""(?m)^\s*${Regex.escape(key)}\s*=\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
-        val match = regex.find(tomlContent) ?: return emptyList()
-        val body = match.groupValues[1]
-        return Regex(""""([^"]+)"""").findAll(body)
-            .map { it.groupValues[1].trim() }
-            .filter { it.startsWith("http://") || it.startsWith("https://") }
-            .toList()
-    }
-
-    private fun probeHttpHead(urlStr: String, timeoutMs: Int): Long {
-        var conn: HttpURLConnection? = null
-        return try {
-            val start = System.currentTimeMillis()
-            conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                connectTimeout = timeoutMs
-                readTimeout = timeoutMs
-                requestMethod = "HEAD"
-                instanceFollowRedirects = false
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
-            }
-            val code = conn.responseCode
-            val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
-            if (code in 100..599) elapsed else -1L
-        } catch (_: Exception) {
-            -1L
-        } finally {
-            conn?.disconnect()
+            triggerConnectivityCheck()
+        } catch (e: Throwable) {
+            Log.e("ANet", "Failed to trigger connectivity check: ${e.message}")
         }
     }
 
@@ -4636,7 +4442,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(connectTimeoutRunnable)
-        mainHandler.removeCallbacks(fallbackProbeRunnable)
         unregisterReceiver(statusReceiver)
         clearUiCallback()
         super.onDestroy()
