@@ -398,7 +398,20 @@ class ANetVpnService : VpnService() {
 
         val builder = Builder()
         builder.addAddress(ip, prefix)
-        builder.setMtu(mtu)
+        var effectiveMtu = mtu
+        try {
+            // Заворачиваем глобальный IPv6 (2000::/3) в ULA-sinkhole туннеля,
+            // чтобы приложения с зашитыми IPv6-адресами (Telegram на мобильных сетях 4G)
+            // не утекали мимо IPv4 VPN и мгновенно переключались на IPv4 через TCP RST от ядра ANet.
+            builder.addAddress("fd00:ec54:1::2", 128)
+            builder.addRoute("2000::/3", 3)
+            if (VERSION.SDK_INT >= VERSION_CODES.R && effectiveMtu < 1280) {
+                effectiveMtu = 1280
+            }
+        } catch (e: Exception) {
+            Log.w("ANet", "IPv6 sinkhole setup skipped: $e")
+        }
+        builder.setMtu(effectiveMtu)
         builder.setSession("ANet VPN")
 
         renewWakeLock(force = true)
